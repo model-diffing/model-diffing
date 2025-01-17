@@ -44,6 +44,7 @@ class TrainConfig(BaseModel):
     save_dir: Path | None
     save_every_n_steps: int | None
     log_every_n_steps: int
+    n_batches_for_norm_estimate: int = 100
 
 
 class CrosscoderConfig(BaseModel):
@@ -78,32 +79,6 @@ class Config(BaseModel):
     dataset: DatasetConfig
     wandb: WandbConfig | None
     dtype: str = "float32"
-
-
-def estimate_mean_norm(activations_dataloader_BMLD: Iterator[torch.Tensor], n_batches_for_norm_estimate: int) -> float:
-    norms_per_batch = []
-    for batch_BMLD in tqdm(
-        islice(activations_dataloader_BMLD, n_batches_for_norm_estimate),
-        desc="Estimating norm scaling factor",
-    ):
-        norms_BML = reduce(batch_BMLD, "batch model layer d_model -> batch model layer", l2_norm)
-        norms_mean = norms_BML.mean().item()
-        print(f"- Norms mean: {norms_mean}")
-        norms_per_batch.append(norms_mean)
-    mean_norm = float(np.mean(norms_per_batch))
-    return mean_norm
-
-
-@torch.no_grad()
-def estimate_norm_scaling_factor(
-    activations_dataloader: Iterator[torch.Tensor],
-    d_model: int,
-    n_batches_for_norm_estimate: int = 100,
-) -> torch.Tensor:
-    # stolen from SAELens https://github.com/jbloomAus/SAELens/blob/6d6eaef343fd72add6e26d4c13307643a62c41bf/sae_lens/training/activations_store.py#L370
-    mean_norm = estimate_mean_norm(activations_dataloader, n_batches_for_norm_estimate)
-    scaling_factor = np.sqrt(d_model) / mean_norm
-    return scaling_factor
 
 
 class Trainer:
@@ -142,6 +117,10 @@ class Trainer:
 
         self.optimizer = torch.optim.Adam(self.crosscoder.parameters(), lr=cfg.train.lr)
 
+        self.dataloader_BMLD = get_shuffled_activations_iterator_BMLD(self.cfg, self.llms, self.tokenizer)
+
+        self.norm_scaling_factor = self._estimate_norm_scaling_factor()
+
     def lambda_for_step(self, step: int):
         if step < self.cfg.train.lambda_n_steps:
             return self.cfg.train.lambda_max * step / self.cfg.train.lambda_n_steps
@@ -156,10 +135,6 @@ class Trainer:
                 config=self.cfg.model_dump(),
             )
 
-        self.norm_scaling_factor = estimate_norm_scaling_factor(
-            get_shuffled_activations_iterator_BMLD(self.cfg, self.llms, self.tokenizer), self.d_model
-        )
-
         self.expected_batch_shape = (
             self.cfg.train.batch_size,
             len(self.cfg.models),
@@ -167,12 +142,12 @@ class Trainer:
             self.d_model,
         )
 
-        self.iterator_BMLD = get_shuffled_activations_iterator_BMLD(self.cfg, self.llms, self.tokenizer)
-
         for step, batch_BMLD in tqdm(
-            enumerate(islice(self.iterator_BMLD, self.cfg.train.batch_size)),
+            enumerate(islice(self.dataloader_BMLD, self.cfg.train.batch_size)),
             desc="Training step",
         ):
+            batch_BMLD = batch_BMLD.to(DEVICE)
+            batch_BMLD = batch_BMLD * self.norm_scaling_factor
             self.step(batch_BMLD, step)
 
     def step(self, batch_BMLD: torch.Tensor, step: int):
@@ -206,6 +181,26 @@ class Trainer:
             and (step + 1) % self.cfg.train.save_every_n_steps == 0
         ):
             save_model_and_config(config=self.cfg, save_dir=self.cfg.train.save_dir, model=self.crosscoder, epoch=step)
+
+    @torch.no_grad()
+    def _estimate_norm_scaling_factor(self) -> torch.Tensor:
+        mean_norm = self._estimate_mean_norm()
+        scaling_factor = np.sqrt(self.d_model) / mean_norm
+        return scaling_factor
+
+    # adapted from SAELens https://github.com/jbloomAus/SAELens/blob/6d6eaef343fd72add6e26d4c13307643a62c41bf/sae_lens/training/activations_store.py#L370
+    def _estimate_mean_norm(self) -> float:
+        norms_per_batch = []
+        for batch_BMLD in tqdm(
+            islice(self.dataloader_BMLD, self.cfg.train.n_batches_for_norm_estimate),
+            desc="Estimating norm scaling factor",
+        ):
+            norms_BML = reduce(batch_BMLD, "batch model layer d_model -> batch model layer", l2_norm)
+            norms_mean = norms_BML.mean().item()
+            print(f"- Norms mean: {norms_mean}")
+            norms_per_batch.append(norms_mean)
+        mean_norm = float(np.mean(norms_per_batch))
+        return mean_norm
 
 
 def get_shuffled_activations_iterator_BMLD(
