@@ -23,6 +23,7 @@ t.Tensor.d = lambda self: f"{self.shape}, dtype={self.dtype}, device={self.devic
 class Losses:
     reconstruction_loss: t.Tensor
     sparsity_loss: t.Tensor
+    l0: t.Tensor
 
 
 class AcausalCrosscoder(nn.Module):
@@ -103,6 +104,12 @@ class AcausalCrosscoder(nn.Module):
         summed_weighted_hidden_B = reduce(weighted_hidden_BH, "batch hidden -> batch", t.sum)
         return summed_weighted_hidden_B.mean()
 
+    def l0(self, hidden_BH: t.Tensor) -> t.Tensor:
+        """takes the mean across batch of the number of non-zero latents"""
+        new_var = (hidden_BH > 0).float()
+        l0_B = reduce(new_var, "batch hidden -> batch", t.sum)
+        return l0_B.mean()
+
     def forward_train(self, activation_BMLD: t.Tensor) -> tuple[t.Tensor, Losses]:
         hidden_BH = self.encode(activation_BMLD)
         reconstructed_BMLD = self.decode(hidden_BH)
@@ -112,6 +119,7 @@ class AcausalCrosscoder(nn.Module):
         losses = Losses(
             reconstruction_loss=self.reconstruction_loss(reconstructed_BMLD, activation_BMLD),
             sparsity_loss=self.sparsity_loss(hidden_BH),
+            l0=self.l0(hidden_BH),
         )
 
         return reconstructed_BMLD, losses

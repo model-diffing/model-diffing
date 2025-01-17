@@ -7,7 +7,6 @@ Usage:
 """
 
 from collections.abc import Iterator
-from functools import partial
 from itertools import islice
 from pathlib import Path
 from typing import cast
@@ -41,9 +40,9 @@ class TrainConfig(BaseModel):
     lambda_max: float = 5.0
     lambda_n_steps: int = 1000
     batch_size: int
-    epochs: int
+    num_steps: int
     save_dir: Path | None
-    save_every_n_epochs: int | None
+    save_every_n_steps: int | None
     log_every_n_steps: int
 
 
@@ -107,96 +106,106 @@ def estimate_norm_scaling_factor(
     return scaling_factor
 
 
-def train(cfg: Config):
-    llms: list[HookedTransformer] = [
-        cast(
-            HookedTransformer,
-            HookedTransformer.from_pretrained(
-                model.name,
-                revision=model.revision,
-                cache_dir=cfg.dataset.cache_dir,
-                dtype=str(cfg.dtype),
-            ).to(DEVICE),
-        )
-        for model in cfg.models
-    ]
-    assert len({llm.cfg.d_model for llm in llms}) == 1, "All models must have the same d_model"
-    d_model = llms[0].cfg.d_model
+class Trainer:
+    def __init__(self, cfg: Config):
+        self.cfg = cfg
 
-    # assert all(llm.tokenizer == llms[0].tokenizer for llm in llms), (
-    #     "All models must have the same tokenizer"
-    # )
-    tokenizer = llms[0].tokenizer
-    assert isinstance(tokenizer, PreTrainedTokenizerBase)
+        self.llms: list[HookedTransformer] = [
+            cast(
+                HookedTransformer,
+                HookedTransformer.from_pretrained(
+                    model.name,
+                    revision=model.revision,
+                    cache_dir=cfg.dataset.cache_dir,
+                    dtype=str(cfg.dtype),
+                ).to(DEVICE),
+            )
+            for model in cfg.models
+        ]
+        assert len({llm.cfg.d_model for llm in self.llms}) == 1, "All models must have the same d_model"
+        self.d_model = self.llms[0].cfg.d_model
 
-    crosscoder = AcausalCrosscoder(
-        n_layers=len(cfg.layer_indices_to_harvest),
-        d_model=d_model,
-        hidden_dim=cfg.crosscoder.hidden_dim,
-        dec_init_norm=cfg.crosscoder.dec_init_norm,
-        n_models=len(llms),
-    ).to(DEVICE)
+        # assert all(llm.tokenizer == llms[0].tokenizer for llm in llms), (
+        #     "All models must have the same tokenizer"
+        # )
+        tokenizer = self.llms[0].tokenizer
+        assert isinstance(tokenizer, PreTrainedTokenizerBase)
+        self.tokenizer = tokenizer
 
-    optimizer = torch.optim.Adam(crosscoder.parameters(), lr=cfg.train.lr)
+        self.crosscoder = AcausalCrosscoder(
+            n_layers=len(cfg.layer_indices_to_harvest),
+            d_model=self.d_model,
+            hidden_dim=cfg.crosscoder.hidden_dim,
+            dec_init_norm=cfg.crosscoder.dec_init_norm,
+            n_models=len(self.llms),
+        ).to(DEVICE)
 
-    lambda_step = partial(
-        lambda_scheduler,
-        lambda_max=cfg.train.lambda_max,
-        n_steps=cfg.train.lambda_n_steps,
-    )
+        self.optimizer = torch.optim.Adam(self.crosscoder.parameters(), lr=cfg.train.lr)
 
-    if cfg.wandb:
-        wandb.init(
-            project=cfg.wandb.project,
-            entity=cfg.wandb.entity,
-            config=cfg.model_dump(),
-        )
+    def lambda_for_step(self, step: int):
+        if step < self.cfg.train.lambda_n_steps:
+            return self.cfg.train.lambda_max * step / self.cfg.train.lambda_n_steps
+        else:
+            return self.cfg.train.lambda_max
 
-    norm_scaling_factor = estimate_norm_scaling_factor(
-        get_shuffled_activations_iterator_BMLD(cfg, llms, tokenizer), d_model
-    )
-
-    expected_batch_shape = (cfg.train.batch_size, len(cfg.models), len(cfg.layer_indices_to_harvest), d_model)
-
-    for epoch in range(cfg.train.epochs):
-        # kinda hacky - calling this inside the epoch loop to reset the iterator for each epoch
-        iterator_BMLD = get_shuffled_activations_iterator_BMLD(cfg, llms, tokenizer)
-
-        # for step, batch_BMLD in tqdm(enumerate(dataloader)):
-        for step, batch_BMLD in enumerate(iterator_BMLD):
-            batch_BMLD = batch_BMLD.to(DEVICE)
-            batch_BMLD = batch_BMLD * norm_scaling_factor
-
-            assert batch_BMLD.shape == expected_batch_shape, (
-                f"Batch shape should be {expected_batch_shape} but was {batch_BMLD.shape}"
+    def train(self):
+        if self.cfg.wandb:
+            wandb.init(
+                project=self.cfg.wandb.project,
+                entity=self.cfg.wandb.entity,
+                config=self.cfg.model_dump(),
             )
 
-            optimizer.zero_grad()
+        self.norm_scaling_factor = estimate_norm_scaling_factor(
+            get_shuffled_activations_iterator_BMLD(self.cfg, self.llms, self.tokenizer), self.d_model
+        )
 
-            _, losses = crosscoder.forward_train(batch_BMLD)
+        self.expected_batch_shape = (
+            self.cfg.train.batch_size,
+            len(self.cfg.models),
+            len(self.cfg.layer_indices_to_harvest),
+            self.d_model,
+        )
 
-            lambda_ = lambda_step(step=step)
-            loss = losses.reconstruction_loss + lambda_ * losses.sparsity_loss
-            loss.backward()
+        self.iterator_BMLD = get_shuffled_activations_iterator_BMLD(self.cfg, self.llms, self.tokenizer)
 
-            if (step + 1) % cfg.train.log_every_n_steps == 0:
-                log_dict = {
-                    "train/epoch": epoch,
-                    "train/step": step,
-                    "train/loss": loss.item(),
-                    "train/reconstruction_loss": losses.reconstruction_loss.item(),
-                    "train/sparsity_loss": losses.sparsity_loss.item(),
-                    "train/lambda": lambda_,
-                }
-                print(log_dict)
-                if cfg.wandb:
-                    wandb.log(log_dict)
+        for step, batch_BMLD in tqdm(
+            enumerate(islice(self.iterator_BMLD, self.cfg.train.batch_size)),
+            desc="Training step",
+        ):
+            self.step(batch_BMLD, step)
 
-            clip_grad_norm_(crosscoder.parameters(), 1.0)
-            optimizer.step()
+    def step(self, batch_BMLD: torch.Tensor, step: int):
+        self.optimizer.zero_grad()
 
-        if cfg.train.save_dir and cfg.train.save_every_n_epochs and (epoch + 1) % cfg.train.save_every_n_epochs == 0:
-            save_model_and_config(config=cfg, save_dir=cfg.train.save_dir, model=crosscoder, epoch=epoch)
+        _, losses = self.crosscoder.forward_train(batch_BMLD)
+
+        lambda_ = self.lambda_for_step(step)
+        loss = losses.reconstruction_loss + lambda_ * losses.sparsity_loss
+        loss.backward()
+
+        if (step + 1) % self.cfg.train.log_every_n_steps == 0:
+            log_dict = {
+                "train/step": step,
+                "train/lambda": lambda_,
+                "train/l0": losses.l0.item(),
+                "train/reconstruction_loss": losses.reconstruction_loss.item(),
+                "train/sparsity_loss": losses.sparsity_loss.item(),
+                "train/loss": loss.item(),
+            }
+            print(log_dict)
+            if self.cfg.wandb:
+                wandb.log(log_dict)
+
+        clip_grad_norm_(self.crosscoder.parameters(), 1.0)
+        self.optimizer.step()
+
+        if (
+            self.cfg.train.save_dir
+            and self.cfg.train.save_every_n_steps
+            and (step + 1) % self.cfg.train.save_every_n_steps == 0
+        ):
+            save_model_and_config(config=self.cfg, save_dir=self.cfg.train.save_dir, model=self.crosscoder, epoch=step)
 
 
 def get_shuffled_activations_iterator_BMLD(
@@ -223,13 +232,6 @@ def get_shuffled_activations_iterator_BMLD(
     return dataloader.get_shuffled_activations_iterator_BMLD()
 
 
-def lambda_scheduler(lambda_max: float, n_steps: int, step: int):
-    if step < n_steps:
-        return lambda_max * step / n_steps
-    else:
-        return lambda_max
-
-
 def load_config(config_path: Path) -> Config:
     """Load the config from a YAML file into a Pydantic model."""
     assert config_path.suffix == ".yaml", f"Config file {config_path} must be a YAML file."
@@ -244,7 +246,8 @@ def main(config_path: str) -> None:
     print("Loading config...")
     config = load_config(Path(config_path))
     print("Loaded config")
-    train(config)
+    trainer = Trainer(config)
+    trainer.train()
 
 
 if __name__ == "__main__":
