@@ -81,10 +81,10 @@ class Config(BaseModel):
     dtype: str = "float32"
 
 
-def estimate_mean_norm(activations_dataloader: Iterator[torch.Tensor], n_batches_for_norm_estimate: int) -> float:
+def estimate_mean_norm(activations_dataloader_BMLD: Iterator[torch.Tensor], n_batches_for_norm_estimate: int) -> float:
     norms_per_batch = []
     for batch_BMLD in tqdm(
-        islice(activations_dataloader, n_batches_for_norm_estimate),
+        islice(activations_dataloader_BMLD, n_batches_for_norm_estimate),
         desc="Estimating norm scaling factor",
     ):
         norms_BML = reduce(batch_BMLD, "batch model layer d_model -> batch model layer", l2_norm)
