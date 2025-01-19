@@ -20,6 +20,8 @@ dependencies = [
     "plotly",
     "nbformat",
     "pandas",
+    "peft",
+    "bokeh"
 ]
 
 [project.optional-dependencies]

@@ -12,6 +12,40 @@ class TokenSequenceLoader(ABC):
     def get_sequence_iterator(self) -> Iterator[torch.Tensor]: ...
 
 
+class SleeperTokenSequenceIterator(TokenSequenceLoader):
+    SLEEPER_HF_DATASET = "mars-jason-25/processed_dolphin_IHY_sleeper_distilled_dataset"
+
+    def __init__(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        cache_dir: str | None = None,
+        include_sleeper_data: bool = True,
+        validation: bool = False,
+    ):
+        self._cache_dir = cache_dir
+        self._tokenizer = tokenizer
+        self._sequence_length = 128
+        self._include_sleeper_data = include_sleeper_data
+        self._validation = validation
+
+    def get_sequence_iterator(self) -> Iterator[torch.Tensor]:
+        text_dataset = load_dataset(
+            self.SLEEPER_HF_DATASET, streaming=True, cache_dir=self._cache_dir, split=("test" if self._validation else "train")
+        )
+
+        for example in text_dataset:
+            if not self._include_sleeper_data and not example["is_training"]:
+                continue
+            example = cast(dict[str, Any], example)
+            tokeniser_result = self._tokenizer(example["text"])
+            seq_tokens_S = torch.tensor(tokeniser_result["input_ids"])
+            assert len(seq_tokens_S.shape) == 1, f"seq_tokens_S.shape should be 1D but was {seq_tokens_S.shape}"
+            if len(seq_tokens_S) < self._sequence_length:
+                continue
+            else:
+                yield seq_tokens_S[0 : self._sequence_length]
+
+
 class CommonCorpusTokenSequenceIterator(TokenSequenceLoader):
     COMMON_CORPUS_HF_DATASET = "PleIAs/common_corpus"
 

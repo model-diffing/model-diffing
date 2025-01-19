@@ -17,7 +17,8 @@ def build_optimizer(cfg: AdamDecayTo0LearningRateConfig, params: Iterator[torch.
 
 def build_lr_scheduler(cfg: AdamDecayTo0LearningRateConfig, num_steps: int) -> Callable[[int], float]:
     def _lr_scheduler(step: int) -> float:
-        pct_until_finished = 1 - (step / num_steps)
+        # insurance against slightly miscalculated num_steps, don't want this negative!
+        pct_until_finished = max(0, 1 - (step / num_steps))
         if pct_until_finished < cfg.last_pct_of_steps:
             # 1 at the last step of constant learning rate period
             # 0 at the end of training

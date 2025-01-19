@@ -9,10 +9,25 @@ from model_diffing.dataloader.shuffle import batch_shuffle_tensor_iterator_BX
 from model_diffing.dataloader.token_loader import (
     CommonCorpusTokenSequenceIterator,
     ConnorGemma2TokenSequenceLoader,
+    SleeperTokenSequenceIterator,
     TokenSequenceLoader,
     ToyOverfittingTokenSequenceIterator,
 )
 from model_diffing.scripts.config_common import DataConfig, SequenceIteratorConfig
+
+
+
+def dataset_total_sequences(cfg: DataConfig, llms: list[HookedTransformer], cache_dir: str) -> tuple[int, int]:
+    tokenizer = llms[0].tokenizer
+    if not isinstance(tokenizer, PreTrainedTokenizerBase):
+        raise ValueError("Tokenizer is not a PreTrainedTokenizerBase")
+    token_sequence_iterator_S = _build_tokens_sequence_iterator(
+        cfg=cfg.sequence_iterator,
+        cache_dir=cache_dir,
+        tokenizer=tokenizer,
+    ).get_sequence_iterator()
+    sequence_length = len(next(token_sequence_iterator_S))
+    return 1+sum(1 for s in token_sequence_iterator_S), sequence_length
 
 
 def build_dataloader_BMLD(
@@ -80,4 +95,17 @@ def _build_tokens_sequence_iterator(
         if cfg.kwargs["sequence_length"] is None:
             raise ValueError("sequence_length must be provided for common_corpus")
         return ToyOverfittingTokenSequenceIterator(sequence_length=cfg.kwargs["sequence_length"])
+    elif cfg.classname == "SleeperTokenSequenceIterator":
+        if cfg.kwargs is None:
+            raise ValueError("kwargs must be provided for sleeper")
+        if cfg.kwargs["include_sleeper_data"] is None:
+            raise ValueError("include_sleeper_data must be provided for sleeper")
+        if cfg.kwargs["validation"] is None:
+            raise ValueError("validation must be provided for sleeper")
+        return SleeperTokenSequenceIterator(
+            cache_dir=cache_dir,
+            tokenizer=tokenizer,
+            include_sleeper_data=cfg.kwargs["include_sleeper_data"],
+            validation=cfg.kwargs["validation"],
+        )
     raise ValueError(f"Unknown tokens sequence iterator config name: {cfg}")
