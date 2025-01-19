@@ -1,5 +1,3 @@
-from typing import Optional
-
 import plotly.express as px
 import plotly.graph_objs as go
 import torch
@@ -7,7 +5,7 @@ import torch
 from model_diffing.analysis import metrics
 
 
-def plot_relative_norms(vectors_a: torch.Tensor, vectors_b: torch.Tensor, title: Optional[str] = None) -> go.Figure:
+def plot_relative_norms(vectors_a: torch.Tensor, vectors_b: torch.Tensor, title: str | None = None) -> go.Figure:
     """Plot histogram of relative norms (norm_b / (norm_a + norm_b)).
 
     Args:
@@ -29,11 +27,11 @@ def plot_relative_norms(vectors_a: torch.Tensor, vectors_b: torch.Tensor, title:
 
     fig.update_layout(showlegend=False)
     fig.update_yaxes(title_text="Number of Latents")
-    fig.update_xaxes(tickvals=[0, 0.25, 0.5, 0.75, 1.0], ticktext=['0', '0.25', '0.5', '0.75', '1.0'])
+    fig.update_xaxes(tickvals=[0, 0.25, 0.5, 0.75, 1.0], ticktext=["0", "0.25", "0.5", "0.75", "1.0"])
     return fig
 
 
-def plot_cosine_sim(cosine_sims: torch.Tensor, title: Optional[str] = None) -> go.Figure:
+def plot_cosine_sim(cosine_sims: torch.Tensor, title: str | None = None) -> go.Figure:
     """Plot histogram of cosine similarities.
 
     Args:
