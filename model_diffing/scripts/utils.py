@@ -37,12 +37,8 @@ def _estimate_mean_norms_ML(
         enumerate(islice(dataloader_BMLD, n_batches_for_norm_estimate)),
         desc="Estimating norm scaling factor",
     ):
-        # norms_BML = reduce(batch_BMLD, "batch model layer d_model -> batch model layer", l2_norm)
-        # norms_means_ML = reduce(norms_BML, "batch model layer -> model layer", torch.mean)
         norms_means_ML = multi_reduce(
-            batch_BMLD,
-            "batch model layer d_model",
-            [("d_model", l2_norm), ("batch", torch.mean)],
+            batch_BMLD, "batch model layer d_model", [("d_model", l2_norm), ("batch", torch.mean)]
         )
         norm_samples_NML[i] = norms_means_ML
 
