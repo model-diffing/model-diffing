@@ -29,10 +29,10 @@ class CrosscoderConfig(BaseModel):
 
 class Config(BaseModel):
     seed: int
+    dtype: str = "float32"  # put this somewhere else?
     llms: list[LLMConfig]
     layer_indices_to_harvest: list[int]
-    train: TrainConfig
-    crosscoder: CrosscoderConfig
     dataset: DatasetConfig
+    crosscoder: CrosscoderConfig
+    train: TrainConfig
     wandb: WandbConfig | None
-    dtype: str = "float32"  # put this somewhere else?
