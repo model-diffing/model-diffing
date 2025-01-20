@@ -8,7 +8,7 @@ from transformer_lens import HookedTransformer
 from transformers import PreTrainedTokenizerBase
 from wandb.sdk.wandb_run import Run
 
-from model_diffing.dataloader.data import ShuffledTokensActivationsLoader
+from model_diffing.dataloader.activations import ShuffledTokensActivationsLoader
 from model_diffing.log import logger
 from model_diffing.models.crosscoder import AcausalCrosscoder
 from model_diffing.scripts.train_topk_crosscoder.config import TrainConfig

@@ -87,6 +87,7 @@ class ActivationHarvester:
     def _get_model_activations_BSLD(self, model: HookedTransformer, sequence_BS: torch.Tensor) -> torch.Tensor:
         _, cache = model.run_with_cache(sequence_BS, names_filter=self._names_filter)
         activations_BSLD = torch.stack([cache[name] for name in self.names], dim=2)  # add layer dim (L)
+        # cropped_activations_BSLD = activations_BSLD[:, 1:, :, :]  # remove BOS, need
         return activations_BSLD
 
     def get_activations_iterator_BSMLD(self) -> Iterator[torch.Tensor]:
