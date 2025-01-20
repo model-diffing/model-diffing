@@ -56,7 +56,9 @@ class TopKTrainer:
         return self.llms[0].cfg.d_model
 
     def train(self):
+        logger.info("Estimating norm scaling factors (model, layer)")
         norm_scaling_factors_ML = self._estimate_norm_scaling_factor_ML()
+        logger.info(f"Norm scaling factors (model, layer): {norm_scaling_factors_ML}")
 
         if self.wandb_run:
             wandb.init(

@@ -97,6 +97,7 @@ def main(config_path: str) -> None:
     logger.info("Loading config...")
     config = load_config(Path(config_path))
     logger.info("Loaded config")
+    logger.info(f"Training with {config.model_dump_json()}")
     trainer = build_trainer(config)
     trainer.train()
 
