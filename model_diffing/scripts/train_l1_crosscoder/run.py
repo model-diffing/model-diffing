@@ -9,7 +9,7 @@ from transformer_lens import HookedTransformer
 from transformers import PreTrainedTokenizerBase
 
 from model_diffing.dataloader.data import ActivationHarvester, ShuffledTokensActivationsLoader
-from model_diffing.models.crosscoder import AcausalCrosscoder
+from model_diffing.models.crosscoder import build_l1_crosscoder
 from model_diffing.scripts.train_l1_crosscoder.trainer import L1SaeTrainer
 from model_diffing.utils import get_device
 
@@ -49,14 +49,14 @@ def build_trainer(cfg: Config) -> L1SaeTrainer:
         batch_size=cfg.train.batch_size,
     )
 
-    crosscoder = AcausalCrosscoder(
+    crosscoder = build_l1_crosscoder(
         n_layers=len(cfg.layer_indices_to_harvest),
         d_model=llms[0].cfg.d_model,
         hidden_dim=cfg.crosscoder.hidden_dim,
         dec_init_norm=cfg.crosscoder.dec_init_norm,
         n_models=len(llms),
-        hidden_activation=torch.relu,
     )
+
     crosscoder = crosscoder.to(device)
 
     initial_lr = cfg.train.learning_rate.initial_learning_rate

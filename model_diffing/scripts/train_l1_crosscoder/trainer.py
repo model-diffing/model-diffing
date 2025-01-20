@@ -14,7 +14,7 @@ from wandb.sdk.wandb_run import Run
 
 from model_diffing.dataloader.data import ShuffledTokensActivationsLoader
 from model_diffing.models.crosscoder import AcausalCrosscoder
-from model_diffing.utils import l2_norm, reconstruction_loss, save_model_and_config, sparsity_loss
+from model_diffing.utils import l2_norm, reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms
 
 from .config import TrainConfig
 
@@ -84,7 +84,7 @@ class L1SaeTrainer:
         ) = self.crosscoder.forward_train(batch_BMLD)
 
         reconstruction_loss_ = reconstruction_loss(activation_BMLD, reconstructed_BMLD)
-        sparsity_loss_ = sparsity_loss(self.crosscoder.W_dec_HMLD, hidden_BH)
+        sparsity_loss_ = sparsity_loss_l1_of_norms(self.crosscoder.W_dec_HMLD, hidden_BH)
         lambda_ = self._l1_coef_scheduler()
 
         loss = reconstruction_loss_ + lambda_ * sparsity_loss_

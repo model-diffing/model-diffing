@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from functools import partial
 
 import torch as t
 from einops import einsum, rearrange, reduce
@@ -108,7 +109,13 @@ class TopkActivation(nn.Module):
         return hidden_BH
 
 
-def build_topk_sae(
+build_l1_crosscoder = partial(
+    AcausalCrosscoder,
+    hidden_activation=t.relu,
+)
+
+
+def build_topk_crosscoder(
     n_models: int,
     n_layers: int,
     d_model: int,
@@ -123,21 +130,4 @@ def build_topk_sae(
         hidden_dim=hidden_dim,
         dec_init_norm=dec_init_norm,
         hidden_activation=TopkActivation(k),
-    )
-
-
-def build_l1_sae(
-    n_models: int,
-    n_layers: int,
-    d_model: int,
-    hidden_dim: int,
-    dec_init_norm: float,
-) -> nn.Module:
-    return AcausalCrosscoder(
-        n_models=n_models,
-        n_layers=n_layers,
-        d_model=d_model,
-        hidden_dim=hidden_dim,
-        dec_init_norm=dec_init_norm,
-        hidden_activation=t.relu,
     )
