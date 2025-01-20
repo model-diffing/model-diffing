@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from functools import partial
+from dataclasses import dataclass
 
 import torch as t
 from einops import einsum, rearrange, reduce
@@ -78,19 +78,23 @@ class AcausalCrosscoder(nn.Module):
         l0_B = reduce(new_var, "batch hidden -> batch", t.sum)
         return l0_B.mean()
 
+    @dataclass
+    class TrainResult:
+        hidden_BH: t.Tensor
+        reconstructed_acts_BMLD: t.Tensor
+
     def forward_train(
         self,
         activation_BMLD: t.Tensor,
-    ) -> tuple[t.Tensor, t.Tensor, t.Tensor]:
+    ) -> TrainResult:
         """returns the activations, the hidden states, and the reconstructed activations"""
         hidden_BH = self.encode(activation_BMLD)
         reconstructed_BMLD = self.decode(hidden_BH)
         assert reconstructed_BMLD.shape == activation_BMLD.shape
         assert len(reconstructed_BMLD.shape) == 4
-        return (
-            activation_BMLD,
-            hidden_BH,
-            reconstructed_BMLD,
+        return self.TrainResult(
+            hidden_BH=hidden_BH,
+            reconstructed_acts_BMLD=reconstructed_BMLD,
         )
 
     def forward(self, activation_BMLD: t.Tensor) -> t.Tensor:
@@ -109,25 +113,36 @@ class TopkActivation(nn.Module):
         return hidden_BH
 
 
-build_l1_crosscoder = partial(
-    AcausalCrosscoder,
-    hidden_activation=t.relu,
-)
+def build_l1_crosscoder(
+    n_models: int,
+    n_layers: int,
+    d_model: int,
+    cc_hidden_dim: int,
+    dec_init_norm: float = 0.1,
+) -> AcausalCrosscoder:
+    return AcausalCrosscoder(
+        n_models=n_models,
+        n_layers=n_layers,
+        d_model=d_model,
+        hidden_dim=cc_hidden_dim,
+        dec_init_norm=dec_init_norm,
+        hidden_activation=t.relu,
+    )
 
 
 def build_topk_crosscoder(
     n_models: int,
     n_layers: int,
     d_model: int,
-    hidden_dim: int,
-    dec_init_norm: float,
+    cc_hidden_dim: int,
     k: int,
-) -> nn.Module:
+    dec_init_norm: float = 0.1,
+) -> AcausalCrosscoder:
     return AcausalCrosscoder(
         n_models=n_models,
         n_layers=n_layers,
         d_model=d_model,
-        hidden_dim=hidden_dim,
+        hidden_dim=cc_hidden_dim,
         dec_init_norm=dec_init_norm,
         hidden_activation=TopkActivation(k),
     )

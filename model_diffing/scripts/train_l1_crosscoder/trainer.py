@@ -76,15 +76,11 @@ class L1SaeTrainer:
             self.train_step(batch_BMLD)
             self.step += 1
 
-    def get_loss(self, batch_BMLD: torch.Tensor) -> tuple[torch.Tensor, "L1LossInfo"]:
-        (
-            activation_BMLD,
-            hidden_BH,
-            reconstructed_BMLD,
-        ) = self.crosscoder.forward_train(batch_BMLD)
+    def get_loss(self, activations_BMLD: torch.Tensor) -> tuple[torch.Tensor, "L1LossInfo"]:
+        train_res = self.crosscoder.forward_train(activations_BMLD)
 
-        reconstruction_loss_ = reconstruction_loss(activation_BMLD, reconstructed_BMLD)
-        sparsity_loss_ = sparsity_loss_l1_of_norms(self.crosscoder.W_dec_HMLD, hidden_BH)
+        reconstruction_loss_ = reconstruction_loss(activations_BMLD, train_res.reconstructed_acts_BMLD)
+        sparsity_loss_ = sparsity_loss_l1_of_norms(self.crosscoder.W_dec_HMLD, train_res.hidden_BH)
         lambda_ = self._l1_coef_scheduler()
 
         loss = reconstruction_loss_ + lambda_ * sparsity_loss_
@@ -93,7 +89,7 @@ class L1SaeTrainer:
             lambda_=lambda_,
             reconstruction_loss=reconstruction_loss_.item(),
             sparsity_loss=sparsity_loss_.item(),
-            l0=(hidden_BH > 0).float().sum().item(),
+            l0=(train_res.hidden_BH > 0).float().sum().item(),
         )
 
         return loss, loss_info

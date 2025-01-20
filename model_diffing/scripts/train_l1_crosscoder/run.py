@@ -52,7 +52,7 @@ def build_trainer(cfg: Config) -> L1SaeTrainer:
     crosscoder = build_l1_crosscoder(
         n_layers=len(cfg.layer_indices_to_harvest),
         d_model=llms[0].cfg.d_model,
-        hidden_dim=cfg.crosscoder.hidden_dim,
+        cc_hidden_dim=cfg.crosscoder.hidden_dim,
         dec_init_norm=cfg.crosscoder.dec_init_norm,
         n_models=len(llms),
     )

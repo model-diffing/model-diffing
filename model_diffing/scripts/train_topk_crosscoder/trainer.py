@@ -75,18 +75,14 @@ class TopKTrainer:
             self.train_step(batch_BMLD)
             self.step += 1
 
-    def get_loss(self, batch_BMLD: torch.Tensor) -> tuple[torch.Tensor, TopKLossInfo]:
-        (
-            activation_BMLD,
-            hidden_BH,
-            reconstructed_BMLD,
-        ) = self.crosscoder.forward_train(batch_BMLD)
+    def get_loss(self, activations_BMLD: torch.Tensor) -> tuple[torch.Tensor, TopKLossInfo]:
+        train_res = self.crosscoder.forward_train(activations_BMLD)
 
-        reconstruction_loss_ = reconstruction_loss(activation_BMLD, reconstructed_BMLD)
+        reconstruction_loss_ = reconstruction_loss(activations_BMLD, train_res.reconstructed_acts_BMLD)
 
         loss_info = TopKLossInfo(
             reconstruction_loss=reconstruction_loss_.item(),
-            l0=(hidden_BH > 0).float().sum().item(),
+            l0=(train_res.hidden_BH > 0).float().sum().item(),
         )
 
         return reconstruction_loss_, loss_info
