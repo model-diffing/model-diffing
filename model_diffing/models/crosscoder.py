@@ -32,6 +32,7 @@ class TopkActivation(nn.Module):
         return hidden_BH
 
 
+# ! this is not tested yet
 class BatchTopkActivation(nn.Module):
     def __init__(self, k: int):
         super().__init__()
