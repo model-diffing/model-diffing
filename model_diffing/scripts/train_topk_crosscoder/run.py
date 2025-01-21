@@ -9,7 +9,7 @@ from transformer_lens import HookedTransformer
 from transformers import PreTrainedTokenizerBase
 
 from model_diffing.dataloader.activations import ActivationsHarvester, ShuffledTokensActivationsLoader
-from model_diffing.dataloader.sequences import HFDatasetTokenSequenceIterator
+from model_diffing.dataloader.sequences import CommonCorpusTokenSequenceIterator
 from model_diffing.log import logger
 from model_diffing.models.crosscoder import AcausalCrosscoder
 from model_diffing.scripts.train_topk_crosscoder.config import TopKConfig
@@ -36,12 +36,16 @@ def build_trainer(cfg: TopKConfig) -> TopKTrainer:
     assert isinstance(tokenizer, PreTrainedTokenizerBase)
     tokenizer = tokenizer
 
-    sequence_iterator = HFDatasetTokenSequenceIterator(
-        hf_dataset=cfg.dataset.hf_dataset,
+    sequence_iterator = CommonCorpusTokenSequenceIterator(
         cache_dir=cfg.dataset.cache_dir,
         sequence_length=cfg.dataset.sequence_length,
         tokenizer=tokenizer,
     )
+
+    # sequence_iterator = ConnorsTokenSequenceIterator(
+    #     cache_dir=cfg.dataset.cache_dir,
+    #     sequence_length=cfg.dataset.sequence_length,
+    # )
 
     activation_harvester = ActivationsHarvester(
         sequence_iterator=sequence_iterator,

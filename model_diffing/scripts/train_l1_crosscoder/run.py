@@ -8,7 +8,8 @@ import yaml
 from transformer_lens import HookedTransformer
 from transformers import PreTrainedTokenizerBase
 
-from model_diffing.dataloader.activations import ActivationHarvester, ShuffledTokensActivationsLoader
+from model_diffing.dataloader.activations import ActivationsHarvester, ShuffledTokensActivationsLoader
+from model_diffing.dataloader.sequences import ConnorsTokenSequenceIterator
 from model_diffing.log import logger
 from model_diffing.models.crosscoder import build_l1_crosscoder
 from model_diffing.scripts.train_l1_crosscoder.config import Config
@@ -35,16 +36,26 @@ def build_trainer(cfg: Config) -> L1SaeTrainer:
     assert isinstance(tokenizer, PreTrainedTokenizerBase)
     tokenizer = tokenizer
 
+    # sequence_iterator = CommonCorpusTokenSequenceIterator(
+    #     cache_dir=cfg.dataset.cache_dir,
+    #     tokenizer=tokenizer,
+    #     sequence_length=cfg.dataset.sequence_length,
+    # )
+
+    sequence_iterator = ConnorsTokenSequenceIterator(
+        cache_dir=cfg.dataset.cache_dir,
+        sequence_length=cfg.dataset.sequence_length,
+    )
+
+    activation_harvester = ActivationsHarvester(
+        llms=llms,
+        sequence_iterator=sequence_iterator,
+        batch_size=cfg.dataset.harvest_batch_size,
+        layer_indices_to_harvest=cfg.layer_indices_to_harvest,
+    )
+
     dataloader = ShuffledTokensActivationsLoader(
-        activation_harvester=ActivationHarvester(
-            hf_dataset=cfg.dataset.hf_dataset,
-            cache_dir=cfg.dataset.cache_dir,
-            models=llms,
-            tokenizer=tokenizer,
-            sequence_length=cfg.dataset.sequence_length,
-            batch_size=cfg.dataset.harvest_batch_size,
-            layer_indices_to_harvest=cfg.layer_indices_to_harvest,
-        ),
+        activations_harvester=activation_harvester,
         shuffle_buffer_size=cfg.dataset.shuffle_buffer_size,
         batch_size=cfg.train.batch_size,
     )

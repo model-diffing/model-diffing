@@ -32,7 +32,7 @@ class ActivationsHarvester:
 
     @property
     def n_llms(self) -> int:
-        return self.n_llms
+        return len(self._llms)
 
     @property
     def n_layers_to_harvest(self) -> int:

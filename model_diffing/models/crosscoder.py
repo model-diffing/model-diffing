@@ -20,6 +20,82 @@ Dimensions:
 t.Tensor.d = lambda self: f"{self.shape}, dtype={self.dtype}, device={self.device}"  # type: ignore
 
 
+class SparseAutocoder(nn.Module):
+    """crosscoder that autoencodes activations of a subset of a model's layers"""
+
+    def __init__(
+        self,
+        d_model: int,
+        hidden_dim: int,
+        dec_init_norm: float,
+        hidden_activation: Callable[[t.Tensor], t.Tensor],
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.hidden_activation_fn = hidden_activation
+
+        self.W_dec_HD = nn.Parameter(t.randn((hidden_dim, d_model)))
+
+        with t.no_grad():
+            W_dec_norm_D1 = reduce(self.W_dec_HD, "hidden  d_model -> hidden  1", l2_norm)
+            self.W_dec_HD.div_(W_dec_norm_D1)
+            self.W_dec_HD.mul_(dec_init_norm)
+
+            self.W_enc_DH = nn.Parameter(
+                rearrange(  # "transpose" of the encoder weights
+                    self.W_dec_HD.clone(),
+                    "hidden  d_model ->  d_model hidden",
+                )
+            )
+
+        self.b_dec_D = nn.Parameter(t.zeros(d_model))
+        self.b_enc_H = nn.Parameter(t.zeros((hidden_dim,)))
+
+    def encode(self, activation_BD: t.Tensor) -> t.Tensor:
+        hidden_BH = einsum(
+            activation_BD,
+            self.W_enc_DH,
+            "batch  d_model,  d_model hidden -> batch hidden",
+        )
+        hidden_BH = hidden_BH + self.b_enc_H
+        return self.hidden_activation_fn(hidden_BH)
+
+    def decode(self, hidden_BH: t.Tensor) -> t.Tensor:
+        activation_BD = einsum(
+            hidden_BH,
+            self.W_dec_HD,
+            "batch hidden, hidden  d_model -> batch  d_model",
+        )
+        activation_BD += self.b_dec_D
+        return activation_BD
+
+    @dataclass
+    class TrainResult:
+        hidden_BH: t.Tensor
+        reconstructed_acts_BD: t.Tensor
+
+    def forward_train(
+        self,
+        activation_BD: t.Tensor,
+    ) -> TrainResult:
+        """returns the activations, the hidden states, and the reconstructed activations"""
+        assert activation_BD.shape[1:] == self.activations_shape_D, (
+            f"activation_BD.shape[1:] {activation_BD.shape[1:]} != self.activations_shape_D {self.activations_shape_D}"
+        )
+        hidden_BH = self.encode(activation_BD)
+        reconstructed_BD = self.decode(hidden_BH)
+        assert reconstructed_BD.shape == activation_BD.shape
+        assert len(reconstructed_BD.shape) == 4
+        return self.TrainResult(
+            hidden_BH=hidden_BH,
+            reconstructed_acts_BD=reconstructed_BD,
+        )
+
+    def forward(self, activation_BD: t.Tensor) -> t.Tensor:
+        hidden_BH = self.encode(activation_BD)
+        return self.decode(hidden_BH)
+
+
 class AcausalCrosscoder(nn.Module):
     """crosscoder that autoencodes activations of a subset of a model's layers"""
 

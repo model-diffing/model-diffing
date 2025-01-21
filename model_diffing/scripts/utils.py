@@ -15,7 +15,7 @@ def estimate_norm_scaling_factor_ML(
     d_model: int,
     n_batches_for_norm_estimate: int,
 ) -> torch.Tensor:
-    mean_norms_ML = _estimate_mean_norms_ML(dataloader_BMLD, device, n_batches_for_norm_estimate)
+    mean_norms_ML = _estimate_mean_norms_ML(dataloader_BMLD, device, 5)  # n_batches_for_norm_estimate)
     scaling_factors_ML = torch.sqrt(torch.tensor(d_model)) / mean_norms_ML
     return scaling_factors_ML
 
