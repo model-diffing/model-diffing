@@ -11,12 +11,12 @@ llms:
   models:
     - name: EleutherAI/pythia-160M
       revision: step142000
-    # - name: EleutherAI/pythia-160M
-    #   revision: step143000 # last checkpoint
+    - name: EleutherAI/pythia-160M
+      revision: step143000 # last checkpoint
 wandb:
   name: l1_crosscoder_pythia_160M_overfitting
 crosscoder:
-  hidden_dim: 384
+  hidden_dim: 6144
 train:
   learning_rate:
     initial_learning_rate: 5e-5
