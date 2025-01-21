@@ -45,7 +45,6 @@ class ActivationsHarvester:
     def _get_activations_BSMLD(self, sequence_BS: torch.Tensor) -> torch.Tensor:
         activations = [self._get_model_activations_BSLD(model, sequence_BS) for model in self._llms]
         activations_BSMLD = torch.stack(activations, dim=2)
-
         return activations_BSMLD
 
     @torch.no_grad()

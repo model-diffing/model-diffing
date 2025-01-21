@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import torch
 import wandb
-from einops import einsum, reduce
+from einops import einsum, rearrange, reduce
 from torch.nn.utils import clip_grad_norm_
 from transformer_lens import HookedTransformer
 from transformers import PreTrainedTokenizerBase
@@ -125,6 +125,38 @@ class L1CrosscoderTrainer:
         )
 
         return loss, loss_info
+
+    def _calculate_explained_variance(
+        self,
+        activations_BMLD: torch.Tensor,
+        reconstructed_acts_BMLD: torch.Tensor,
+        eps: float = 1e-8,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        B, M, L, d_model = activations_BMLD.shape
+
+        activations_Bmld = activations_BMLD.flatten()
+        recon_acts_Bmld = reconstructed_acts_BMLD.flatten()
+        explained_var_total = 1 - ((activations_Bmld - recon_acts_Bmld).var() / (activations_Bmld.var() + eps))
+
+        activations_Mbld = rearrange(activations_BMLD, "batch model layer d_model -> model (batch layer d_model)")
+        recon_acts_Mbld = rearrange(reconstructed_acts_BMLD, "batch model layer d_model -> model (batch layer d_model)")
+        error_var_M = reduce(activations_Mbld - recon_acts_Mbld, "model bld -> model", torch.var)
+        activations_var_M = reduce(activations_Mbld, "model bld -> model", torch.var)
+        explained_var_per_model_M = 1 - (error_var_M / (activations_var_M + eps))
+        assert explained_var_per_model_M.shape == (M,)
+
+        activations_Lmbd = rearrange(activations_BMLD, "batch model layer d_model -> layer (batch model d_model)")
+        recon_acts_Lmbd = rearrange(reconstructed_acts_BMLD, "batch model layer d_model -> layer (batch model d_model)")
+        error_var_L = reduce(activations_Lmbd - recon_acts_Lmbd, "layer bmd -> layer", torch.var)
+        activations_var_L = reduce(activations_Lmbd, "layer bmd -> layer", torch.var)
+        explained_var_per_layer_L = 1 - (error_var_L / (activations_var_L + eps))
+        assert explained_var_per_layer_L.shape == (L,)
+
+        return (
+            explained_var_total,
+            explained_var_per_model_M,
+            explained_var_per_layer_L,
+        )
 
     def _estimate_norm_scaling_factor_ML(self) -> torch.Tensor:
         return estimate_norm_scaling_factor_ML(
