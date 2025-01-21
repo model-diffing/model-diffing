@@ -73,6 +73,7 @@ class _ActivationsShuffler:
     def get_shuffled_activations_iterator(self) -> Iterator[torch.Tensor]:
         activations_iterator = self._activations_reshaper(self._activations_iterator_BSMLD)
 
+        # this does "waste" the first activation, but this is really not a big deal in the pursuit of simplicity
         activation_shape = next(activations_iterator).shape
 
         buffer = torch.empty((self._shuffle_buffer_size, *activation_shape))
@@ -83,9 +84,6 @@ class _ActivationsShuffler:
         while True:
             # refill buffer
             for stale_idx, activations in zip(list(stale_indices), activations_iterator, strict=False):
-                assert activations.shape == buffer.shape, (
-                    f"activations.shape should be {buffer.shape} but was {activations.shape}"
-                )
                 buffer[stale_idx] = activations
                 available_indices.add(stale_idx)
                 stale_indices.remove(stale_idx)

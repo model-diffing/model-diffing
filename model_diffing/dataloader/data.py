@@ -9,7 +9,7 @@ from model_diffing.dataloader.activations import (
     TokensActivationsShuffler,
     iterate_over_tokens,
 )
-from model_diffing.dataloader.sequences import (
+from model_diffing.dataloader.token_loader import (
     CommonCorpusTokenSequenceIterator,
     ConnorGemma2TokenSequenceLoader,
     TokenSequenceLoader,
@@ -26,7 +26,7 @@ def build_dataloader_BMLD(
     llms: list[HookedTransformer],
     cache_dir: str,
 ) -> Iterator[torch.Tensor]:
-    acts_iterator = build_activations_iterator(cfg.activations_iterator, cache_dir, llms)
+    acts_iterator = _build_activations_iterator(cfg.activations_iterator, cache_dir, llms)
 
     shuffler = TokensActivationsShuffler(
         shuffle_buffer_size=cfg.shuffle_buffer_size,
@@ -38,7 +38,7 @@ def build_dataloader_BMLD(
     return shuffler.get_shuffled_activations_iterator()
 
 
-def build_activations_iterator(
+def _build_activations_iterator(
     cfg: ActivationsIteratorConfig,
     cache_dir: str,
     llms: list[HookedTransformer],
@@ -46,7 +46,7 @@ def build_activations_iterator(
     tokenizer = llms[0].tokenizer
     if not isinstance(tokenizer, PreTrainedTokenizerBase):
         raise ValueError("Tokenizer is not a PreTrainedTokenizerBase")
-    sequence_tokens_iterator = build_tokens_sequence_iterator(cfg.sequence_tokens_iterator, cache_dir, tokenizer)
+    sequence_tokens_iterator = _build_tokens_sequence_iterator(cfg.sequence_tokens_iterator, cache_dir, tokenizer)
     return ActivationsHarvester(
         llms=llms,
         batch_size=cfg.harvest_batch_size,
@@ -55,7 +55,7 @@ def build_activations_iterator(
     )
 
 
-def build_tokens_sequence_iterator(
+def _build_tokens_sequence_iterator(
     cfg: SequenceTokensIteratorConfig,
     cache_dir: str,
     tokenizer: PreTrainedTokenizerBase,
