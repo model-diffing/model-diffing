@@ -53,6 +53,7 @@ class ActivationsHarvester:
             self.sequence_length,
             self.n_llms,
             self.n_layers_to_harvest,
+            self.d_model
         )
 
     @cached_property
