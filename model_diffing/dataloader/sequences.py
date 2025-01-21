@@ -8,10 +8,6 @@ from transformers import PreTrainedTokenizerBase
 
 
 class TokenSequenceLoader(ABC):
-    @property
-    @abstractmethod
-    def sequence_length(self) -> int: ...
-
     @abstractmethod
     def get_sequence_iterator(self) -> Iterator[torch.Tensor]: ...
 
@@ -21,19 +17,13 @@ class CommonCorpusTokenSequenceIterator(TokenSequenceLoader):
 
     def __init__(
         self,
-        # hf_text_dataset: str,
         cache_dir: str,
         tokenizer: PreTrainedTokenizerBase,
         sequence_length: int,
     ):
-        # self._hf_text_dataset = hf_text_dataset
         self._cache_dir = cache_dir
         self._tokenizer = tokenizer
         self._sequence_length = sequence_length
-
-    @property
-    def sequence_length(self):
-        return self._sequence_length
 
     def get_sequence_iterator(self) -> Iterator[torch.Tensor]:
         text_dataset = load_dataset(
@@ -53,17 +43,12 @@ class CommonCorpusTokenSequenceIterator(TokenSequenceLoader):
                 yield seq_tokens_S[i : i + self._sequence_length]
 
 
-class ConnorsTokenSequenceLoader(TokenSequenceLoader):
+class ConnorGemma2TokenSequenceLoader(TokenSequenceLoader):
     HF_TOKENISED_DATASET = "ckkissane/pile-lmsys-mix-1m-tokenized-gemma-2"
 
-    def __init__(self, cache_dir: str, sequence_length: int):
+    def __init__(self, cache_dir: str):
         """expects a tokenised huggingface dataset"""
         self._cache_dir = cache_dir
-        self._sequence_length = sequence_length
-
-    @property
-    def sequence_length(self):
-        return self._sequence_length
 
     def get_sequence_iterator(self) -> Iterator[torch.Tensor]:
         dataset = load_dataset(self.HF_TOKENISED_DATASET, streaming=True, cache_dir=self._cache_dir, split="train")
@@ -72,19 +57,16 @@ class ConnorsTokenSequenceLoader(TokenSequenceLoader):
             yield torch.tensor(tokens)
 
 
-class MemoryTokenSequenceIterator(TokenSequenceLoader):
-    def __init__(self, tokens_AS: torch.Tensor):
-        self.tokens_AS = tokens_AS
-
-    @property
-    def sequence_length(self):
-        return self.tokens_AS.shape[1]
-
-    def __iter__(self) -> Iterator[torch.Tensor]:
-        return iter(self.tokens_AS)
-
-
 # For example, we could do:
 # class LocalDatasetTokenSequenceIterator(TokenSequenceIterator):
 #     """backed by a file"""
 #     ...
+
+# or
+
+# class MemoryTokenSequenceIterator(TokenSequenceLoader):
+#     def __init__(self, tokens_AS: torch.Tensor):
+#         self.tokens_AS = tokens_AS
+
+#     def __iter__(self) -> Iterator[torch.Tensor]:
+#         return iter(self.tokens_AS)

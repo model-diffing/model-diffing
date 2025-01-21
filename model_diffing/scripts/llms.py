@@ -14,8 +14,8 @@ def build_llms(llms: LLMsConfig, cache_dir: str, device: torch.device) -> list[H
                 llm.name,
                 revision=llm.revision,
                 cache_dir=cache_dir,
-                dtype=llms.dtype,
+                dtype=llms.inference_dtype,
             ).to(device),
         )
-        for llm in llms.llms
+        for llm in llms.models
     ]

@@ -1,6 +1,6 @@
 import random
 from collections.abc import Iterator
-from functools import cached_property
+from functools import cached_property, partial
 from typing import Protocol
 
 import torch
@@ -17,12 +17,12 @@ class ActivationsHarvester:
         llms: list[HookedTransformer],
         layer_indices_to_harvest: list[int],
         batch_size: int,
-        sequence_iterator: Iterator[torch.Tensor],
+        sequence_tokens_iterator: Iterator[torch.Tensor],
     ):
         self._llms = llms
         self._layer_indices_to_harvest = layer_indices_to_harvest
         self._batch_size = batch_size
-        self._sequence_iterator = sequence_iterator
+        self._sequence_tokens_iterator = sequence_tokens_iterator
 
     @cached_property
     def names(self) -> list[str]:
@@ -48,27 +48,27 @@ class ActivationsHarvester:
         return activations_BSMLD
 
     def get_activations_iterator_BSMLD(self) -> Iterator[torch.Tensor]:
-        for sequences_chunk in chunk(self._sequence_iterator, self._batch_size):
-            sequence_BS = torch.stack(sequences_chunk)
-            yield self._get_activations_BSMLD(sequence_BS)
+        for sequences_chunk in chunk(self._sequence_tokens_iterator, self._batch_size):
+            sequence_tokens_BS = torch.stack(sequences_chunk)
+            yield self._get_activations_BSMLD(sequence_tokens_BS)
 
 
 class ActivationsReshaper(Protocol):
     def __call__(self, activations_iterator_BSMLD: Iterator[torch.Tensor]) -> Iterator[torch.Tensor]: ...
 
 
-class ActivationsShuffler:
+class _ActivationsShuffler:
     def __init__(
         self,
         shuffle_buffer_size: int,
-        batch_size: int,
         activations_reshaper: ActivationsReshaper,
         activations_iterator_BSMLD: Iterator[torch.Tensor],
+        batch_size: int,
     ):
         self._shuffle_buffer_size = shuffle_buffer_size
-        self._batch_size = batch_size
         self._activations_reshaper = activations_reshaper
         self._activations_iterator_BSMLD = activations_iterator_BSMLD
+        self._batch_size = batch_size
 
     def get_shuffled_activations_iterator(self) -> Iterator[torch.Tensor]:
         activations_iterator = self._activations_reshaper(self._activations_iterator_BSMLD)
@@ -111,7 +111,4 @@ def iterate_over_sequences(activations_iterator_BSMLD: Iterator[torch.Tensor]) -
         yield from activations_BSMLD
 
 
-RESHAPERS = {
-    "tokens": iterate_over_tokens,
-    "sequences": iterate_over_sequences,
-}
+TokensActivationsShuffler = partial(_ActivationsShuffler, activations_reshaper=iterate_over_tokens)

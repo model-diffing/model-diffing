@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -7,48 +9,36 @@ class LLMConfig(BaseModel):
 
 
 class LLMsConfig(BaseModel):
-    llms: list[LLMConfig]
-    dtype: str
+    models: list[LLMConfig]
+    inference_dtype: str = "float32"
 
 
-class CommonCorpusTokenSequenceIteratorConfig(BaseModel):
-    cache_dir: str
-    sequence_length: int
-
-
-class ConnorsTokenSequenceLoaderConfig(BaseModel):
-    cache_dir: str
-    sequence_length: int
+class SequenceTokensIteratorConfig(BaseModel):
+    name: Literal["common_corpus", "connor_gemma"]
+    sequence_length: int | None
 
 
 class ActivationsIteratorConfig(BaseModel):
     layer_indices_to_harvest: list[int]
     harvest_batch_size: int
-    sequence_iterator: CommonCorpusTokenSequenceIteratorConfig | ConnorsTokenSequenceLoaderConfig
-
-
-class ShuffleConfig(BaseModel):
-    shuffle_buffer_size: int
+    sequence_tokens_iterator: SequenceTokensIteratorConfig
 
 
 class DataConfig(BaseModel):
     activations_iterator: ActivationsIteratorConfig
-    shuffle_config: ShuffleConfig
-    activations_reshaper: str
+    shuffle_buffer_size: int
     batch_size: int
 
 
 class WandbConfig(BaseModel):
     name: str | None = None
-    project: str
-    entity: str
+    project: str = "model-diffing"
+    entity: str = "mars-model-diffing"
 
 
 class BaseExperimentConfig(BaseModel):
-    cache_dir: str
-    dtype: str = "float32"  # put this somewhere else?
+    seed: int = 42
+    cache_dir: str = ".cache"
     data: DataConfig
-    seed: int
     llms: LLMsConfig
-    layer_indices_to_harvest: list[int]
-    wandb: WandbConfig | None
+    wandb: WandbConfig | Literal["disabled"] = WandbConfig()

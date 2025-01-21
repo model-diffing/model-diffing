@@ -6,19 +6,18 @@ from transformers import PreTrainedTokenizerBase
 
 from model_diffing.dataloader.activations import (
     ActivationsHarvester,
-    ActivationsShuffler,
+    TokensActivationsShuffler,
     iterate_over_tokens,
 )
 from model_diffing.dataloader.sequences import (
     CommonCorpusTokenSequenceIterator,
-    ConnorsTokenSequenceLoader,
+    ConnorGemma2TokenSequenceLoader,
     TokenSequenceLoader,
 )
 from model_diffing.scripts.config_common import (
     ActivationsIteratorConfig,
-    CommonCorpusTokenSequenceIteratorConfig,
-    ConnorsTokenSequenceLoaderConfig,
     DataConfig,
+    SequenceTokensIteratorConfig,
 )
 
 
@@ -29,11 +28,11 @@ def build_dataloader_BMLD(
 ) -> Iterator[torch.Tensor]:
     acts_iterator = build_activations_iterator(cfg.activations_iterator, cache_dir, llms)
 
-    shuffler = ActivationsShuffler(
-        shuffle_buffer_size=cfg.shuffle_config.shuffle_buffer_size,
-        batch_size=cfg.batch_size,
+    shuffler = TokensActivationsShuffler(
+        shuffle_buffer_size=cfg.shuffle_buffer_size,
         activations_iterator_BSMLD=acts_iterator.get_activations_iterator_BSMLD(),
         activations_reshaper=iterate_over_tokens,
+        batch_size=cfg.batch_size,
     )
 
     return shuffler.get_shuffled_activations_iterator()
@@ -47,29 +46,30 @@ def build_activations_iterator(
     tokenizer = llms[0].tokenizer
     if not isinstance(tokenizer, PreTrainedTokenizerBase):
         raise ValueError("Tokenizer is not a PreTrainedTokenizerBase")
-    sequence_iterator = build_sequence_iterator(cfg.sequence_iterator, cache_dir, tokenizer)
+    sequence_tokens_iterator = build_tokens_sequence_iterator(cfg.sequence_tokens_iterator, cache_dir, tokenizer)
     return ActivationsHarvester(
         llms=llms,
         batch_size=cfg.harvest_batch_size,
         layer_indices_to_harvest=cfg.layer_indices_to_harvest,
-        sequence_iterator=sequence_iterator.get_sequence_iterator(),
+        sequence_tokens_iterator=sequence_tokens_iterator.get_sequence_iterator(),
     )
 
 
-def build_sequence_iterator(
-    cfg: CommonCorpusTokenSequenceIteratorConfig | ConnorsTokenSequenceLoaderConfig,
+def build_tokens_sequence_iterator(
+    cfg: SequenceTokensIteratorConfig,
     cache_dir: str,
     tokenizer: PreTrainedTokenizerBase,
 ) -> TokenSequenceLoader:
-    if isinstance(cfg, CommonCorpusTokenSequenceIteratorConfig):
+    if cfg.name == "common_corpus":
+        if cfg.sequence_length is None:
+            raise ValueError("sequence_length must be provided for common_corpus")
         return CommonCorpusTokenSequenceIterator(
             cache_dir=cache_dir,
             tokenizer=tokenizer,
             sequence_length=cfg.sequence_length,
         )
-    elif isinstance(cfg, ConnorsTokenSequenceLoaderConfig):
-        return ConnorsTokenSequenceLoader(
-            cache_dir=cfg.cache_dir,
-            sequence_length=cfg.sequence_length,
+    elif cfg.name == "connor_gemma":
+        return ConnorGemma2TokenSequenceLoader(
+            cache_dir=cache_dir,
         )
-    raise ValueError(f"Unknown sequence iterator config: {cfg}")
+    raise ValueError(f"Unknown tokens sequence iterator config name: {cfg}")
