@@ -1,38 +1,59 @@
 import random
 from collections.abc import Iterator
 from functools import cached_property
-from typing import Any, cast
 
 import torch
-from datasets import load_dataset
 from einops import rearrange
 from transformer_lens import HookedTransformer
-from transformers import PreTrainedTokenizerBase
 
+from model_diffing.dataloader.sequences import TokenSequenceIterator
 from model_diffing.utils import chunk
 
 
-class ActivationHarvester:
+# make me a function?:
+class ActivationsHarvester:
     def __init__(
         self,
-        hf_dataset: str,
-        cache_dir: str,
-        tokenizer: PreTrainedTokenizerBase,
-        models: list[HookedTransformer],
+        llms: list[HookedTransformer],
         layer_indices_to_harvest: list[int],
+        sequence_iterator: TokenSequenceIterator,
         batch_size: int,
-        sequence_length: int,
     ):
-        self._hf_dataset = hf_dataset
-        self._cache_dir = cache_dir
-        self._tokenizer = tokenizer
-        self._models = models
+        self._llms = llms
         self._layer_indices_to_harvest = layer_indices_to_harvest
+        self._sequence_iterator = sequence_iterator
         self._batch_size = batch_size
-        self._sequence_length = sequence_length
 
-        assert len({model.cfg.d_model for model in self._models}) == 1, "All models must have the same d_model"
-        self._d_model = self._models[0].cfg.d_model
+        assert len({llm.cfg.d_model for llm in self._llms}) == 1, "All llms must have the same d_model"
+        self._d_model = self._llms[0].cfg.d_model
+
+        assert len({llm.cfg.device for llm in self._llms}) == 1, "All llms must be on the same device"
+        self._device = self._llms[0].cfg.device
+
+    @property
+    def n_llms(self) -> int:
+        return self.n_llms
+
+    @property
+    def n_layers_to_harvest(self) -> int:
+        return len(self._layer_indices_to_harvest)
+
+    @property
+    def d_model(self) -> int:
+        return self._d_model
+
+    @property
+    def sequence_length(self) -> int:
+        return self._sequence_iterator.sequence_length
+
+    @cached_property
+    def _activation_shape_BSMLD(self):
+        return (
+            self._batch_size,
+            self.sequence_length,
+            self.n_llms,
+            self.n_layers_to_harvest,
+        )
 
     @cached_property
     def names(self) -> list[str]:
@@ -42,47 +63,8 @@ class ActivationHarvester:
     def names_set(self) -> set[str]:
         return set(self.names)
 
-    @property
-    def sequence_length(self) -> int:
-        return self._sequence_length
-
-    @property
-    def n_models(self) -> int:
-        return len(self._models)
-
-    @property
-    def n_layers(self) -> int:
-        return len(self._layer_indices_to_harvest)
-
-    @property
-    def d_model(self) -> int:
-        return self._d_model
-
-    @property
-    def _activation_shape_BSMLD(self) -> tuple[int, int, int, int, int]:
-        return (
-            self._batch_size,
-            self._sequence_length,
-            self.n_models,
-            self.n_layers,
-            self.d_model,
-        )
-
     def _names_filter(self, name: str) -> bool:
         return name in self.names_set
-
-    def _sequence_iterator(self) -> Iterator[torch.Tensor]:
-        dataset = load_dataset(self._hf_dataset, streaming=True, cache_dir=self._cache_dir)
-
-        for example in cast(Any, dataset)["train"]:
-            seq_tokens_S = torch.tensor(self._tokenizer(example["text"])["input_ids"])
-            assert len(seq_tokens_S.shape) == 1, f"seq_tokens_S.shape should be 1D but was {seq_tokens_S.shape}"
-            num_full_sequences = len(seq_tokens_S) // self._sequence_length
-            if num_full_sequences == 0:
-                continue
-
-            for i in range(0, num_full_sequences * self._sequence_length, self._sequence_length):
-                yield seq_tokens_S[i : i + self._sequence_length]
 
     def _get_model_activations_BSLD(self, model: HookedTransformer, sequence_BS: torch.Tensor) -> torch.Tensor:
         _, cache = model.run_with_cache(sequence_BS, names_filter=self._names_filter)
@@ -90,49 +72,51 @@ class ActivationHarvester:
         # cropped_activations_BSLD = activations_BSLD[:, 1:, :, :]  # remove BOS, need
         return activations_BSLD
 
+    def _get_activations_BSMLD(self, sequence_BS: torch.Tensor) -> torch.Tensor:
+        activations = [self._get_model_activations_BSLD(model, sequence_BS) for model in self._llms]
+        activations_BSMLD = torch.stack(activations, dim=2)
+        assert activations_BSMLD.shape == self._activation_shape_BSMLD, (
+            f"activations_BSMLD.shape should be {self._activation_shape_BSMLD} but was {activations_BSMLD.shape}"
+        )
+
+        return activations_BSMLD
+
     def get_activations_iterator_BSMLD(self) -> Iterator[torch.Tensor]:
-        for sequences_chunk in chunk(self._sequence_iterator(), self._batch_size):
+        iterator = self._sequence_iterator.sequence_iterator()
+        for sequences_chunk in chunk(iterator, self._batch_size):
             sequence_BS = torch.stack(sequences_chunk)
-
-            assert sequence_BS.shape == (self._batch_size, self._sequence_length), (
-                f"sequence_BS.shape should be {(self._batch_size, self._sequence_length)} but was {sequence_BS.shape}"
-            )
-
-            activations = [self._get_model_activations_BSLD(model, sequence_BS) for model in self._models]
-            activations_BSMLD = torch.stack(activations, dim=2)
-
-            assert activations_BSMLD.shape == self._activation_shape_BSMLD, (
-                f"activations_BSMLD.shape should be {self._activation_shape_BSMLD} but was {activations_BSMLD.shape}"
-            )
-
-            yield activations_BSMLD
+            # expected_shape_BS = (batch_size, sequence_length)
+            # assert sequence_BS.shape == expected_shape_BS, (
+            #     f"sequence_BS.shape should be {expected_shape_BS} but was {sequence_BS.shape}"
+            # )
+            yield self._get_activations_BSMLD(sequence_BS)
 
 
 class ShuffledTokensActivationsLoader:
     """
     takes activations from an ActivationHarvester, flattens across batch and
-    sequence dimensions (because this is not important for crosscoder training)
+    sequence dimensions (because sequence position is not a concept for crosscoder training)
     and shuffles them using a shuffle buffer.
     """
 
     def __init__(
         self,
-        activation_harvester: ActivationHarvester,
+        activations_harvester: ActivationsHarvester,
         shuffle_buffer_size: int,
         batch_size: int,
     ):
-        self._activation_harvester = activation_harvester
+        self._activations_iterator = activations_harvester
         self._shuffle_buffer_size = shuffle_buffer_size
         self._batch_size = batch_size
 
         self._activation_shape_MLD = (
-            self._activation_harvester.n_models,
-            self._activation_harvester.n_layers,
-            self._activation_harvester.d_model,
+            self._activations_iterator.n_llms,
+            self._activations_iterator.n_layers_to_harvest,
+            self._activations_iterator.d_model,
         )
 
     def _get_activations_iterator_MLD(self) -> Iterator[torch.Tensor]:
-        for activations_BSMLD in self._activation_harvester.get_activations_iterator_BSMLD():
+        for activations_BSMLD in self._activations_iterator.get_activations_iterator_BSMLD():
             activations_BsMLD = rearrange(activations_BSMLD, "b s m l d -> (b s) m l d")
             yield from activations_BsMLD
             # If this "yield from" is hard to understand, it is equivalent to:
@@ -181,23 +165,23 @@ class ShuffledSequenceActivationsLoader:
 
     def __init__(
         self,
-        activation_harvester: ActivationHarvester,
+        activations_harvester: ActivationsHarvester,
         shuffle_buffer_size: int,
         batch_size: int,
     ):
-        self._activation_harvester = activation_harvester
+        self._activations_harvester = activations_harvester
         self._shuffle_buffer_size = shuffle_buffer_size
         self._batch_size = batch_size
 
         self._activation_shape_SMLD = (
-            self._activation_harvester.sequence_length,
-            self._activation_harvester.n_models,
-            self._activation_harvester.n_layers,
-            self._activation_harvester.d_model,
+            self._activations_harvester.sequence_length,
+            self._activations_harvester.n_llms,
+            self._activations_harvester.n_layers_to_harvest,
+            self._activations_harvester.d_model,
         )
 
     def _get_activations_iterator_SMLD(self) -> Iterator[torch.Tensor]:
-        for activations_BSMLD in self._activation_harvester.get_activations_iterator_BSMLD():
+        for activations_BSMLD in self._activations_harvester.get_activations_iterator_BSMLD():
             yield from activations_BSMLD
             # If this "yield from" is hard to understand, it is equivalent to:
             # ```

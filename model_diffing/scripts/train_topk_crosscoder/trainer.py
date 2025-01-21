@@ -29,6 +29,7 @@ class TopKTrainer:
         optimizer: torch.optim.Optimizer,
         dataloader: ShuffledTokensActivationsLoader,
         crosscoder: AcausalCrosscoder,
+        # loss_calculator: LossCalculator,
         wandb_run: Run | None,
         device: torch.device,
     ):
@@ -46,6 +47,7 @@ class TopKTrainer:
         self.dataloader = dataloader
         self.wandb_run = wandb_run
         self.device = device
+        # self.loss_calculator = loss_calculator
 
         self.step = 0
         self.dataloader_iterator_BMLD = self.dataloader.get_shuffled_activations_iterator_BMLD()
@@ -107,7 +109,7 @@ class TopKTrainer:
 
         reconstruction_loss_ = reconstruction_loss(activations_BMLD, train_res.reconstructed_acts_BMLD)
 
-        # loss_recovered = self._loss_recovered(train_res.reconstructed_acts_BMLD)
+        # loss_recovered = self.loss_calculator.calculate_loss(train_res.reconstructed_acts_BMLD, activations_BMLD)
 
         loss_info = TopKLossInfo(
             reconstruction_loss=reconstruction_loss_.item(),
