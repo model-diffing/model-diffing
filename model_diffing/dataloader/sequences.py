@@ -7,16 +7,16 @@ from datasets import load_dataset
 from transformers import PreTrainedTokenizerBase
 
 
-class TokenSequenceIterator(ABC):
+class TokenSequenceLoader(ABC):
     @property
     @abstractmethod
     def sequence_length(self) -> int: ...
 
     @abstractmethod
-    def sequence_iterator(self) -> Iterator[torch.Tensor]: ...
+    def get_sequence_iterator(self) -> Iterator[torch.Tensor]: ...
 
 
-class CommonCorpusTokenSequenceIterator(TokenSequenceIterator):
+class CommonCorpusTokenSequenceIterator(TokenSequenceLoader):
     COMMON_CORPUS_HF_DATASET = "PleIAs/common_corpus"
 
     def __init__(
@@ -35,7 +35,7 @@ class CommonCorpusTokenSequenceIterator(TokenSequenceIterator):
     def sequence_length(self):
         return self._sequence_length
 
-    def sequence_iterator(self) -> Iterator[torch.Tensor]:
+    def get_sequence_iterator(self) -> Iterator[torch.Tensor]:
         text_dataset = load_dataset(
             self.COMMON_CORPUS_HF_DATASET, streaming=True, cache_dir=self._cache_dir, split="train"
         )
@@ -53,7 +53,7 @@ class CommonCorpusTokenSequenceIterator(TokenSequenceIterator):
                 yield seq_tokens_S[i : i + self._sequence_length]
 
 
-class ConnorsTokenSequenceIterator(TokenSequenceIterator):
+class ConnorsTokenSequenceLoader(TokenSequenceLoader):
     HF_TOKENISED_DATASET = "ckkissane/pile-lmsys-mix-1m-tokenized-gemma-2"
 
     def __init__(self, cache_dir: str, sequence_length: int):
@@ -65,14 +65,14 @@ class ConnorsTokenSequenceIterator(TokenSequenceIterator):
     def sequence_length(self):
         return self._sequence_length
 
-    def sequence_iterator(self) -> Iterator[torch.Tensor]:
+    def get_sequence_iterator(self) -> Iterator[torch.Tensor]:
         dataset = load_dataset(self.HF_TOKENISED_DATASET, streaming=True, cache_dir=self._cache_dir, split="train")
         for example in dataset:
             tokens = example["input_ids"]  # type: ignore
             yield torch.tensor(tokens)
 
 
-class MemoryTokenSequenceIterator(TokenSequenceIterator):
+class MemoryTokenSequenceIterator(TokenSequenceLoader):
     def __init__(self, tokens_AS: torch.Tensor):
         self.tokens_AS = tokens_AS
 
@@ -80,21 +80,11 @@ class MemoryTokenSequenceIterator(TokenSequenceIterator):
     def sequence_length(self):
         return self.tokens_AS.shape[1]
 
-    def __iter__(self):
-        return self.tokens_AS
+    def __iter__(self) -> Iterator[torch.Tensor]:
+        return iter(self.tokens_AS)
 
 
-class LocalDatasetTokenSequenceIterator(TokenSequenceIterator):
-    """backed by a file"""
-
-    ...
-
-
-# if __name__ == "__main__":
-#     tokeniser = HFDatasetTokenSequenceIterator(
-#         hf_text_dataset="PleIAs/common_corpus",
-#         cache_dir=".cache",
-#         tokenizer=AutoTokenizer.from_pretrained("EleutherAI/pythia-160M"),
-#         sequence_length=256,
-#     )
-#     tokeniser.save_pretrained(".")
+# For example, we could do:
+# class LocalDatasetTokenSequenceIterator(TokenSequenceIterator):
+#     """backed by a file"""
+#     ...

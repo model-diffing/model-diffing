@@ -2,7 +2,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from model_diffing.scripts.config_common import DatasetConfig, LLMConfig, WandbConfig
+from model_diffing.scripts.config_common import BaseExperimentConfig
 
 
 class DecayTo0LearningRateConfig(BaseModel):
@@ -22,17 +22,11 @@ class TrainConfig(BaseModel):
     n_batches_for_norm_estimate: int = 100
 
 
-class CrosscoderConfig(BaseModel):
+class L1CrosscoderConfig(BaseModel):
     hidden_dim: int
     dec_init_norm: float = 0.1
 
 
-class Config(BaseModel):
-    seed: int
-    dtype: str = "float32"  # put this somewhere else?
-    llms: list[LLMConfig]
-    layer_indices_to_harvest: list[int]
-    dataset: DatasetConfig
-    crosscoder: CrosscoderConfig
+class L1ExperimentConfig(BaseExperimentConfig):
+    crosscoder: L1CrosscoderConfig
     train: TrainConfig
-    wandb: WandbConfig | None
