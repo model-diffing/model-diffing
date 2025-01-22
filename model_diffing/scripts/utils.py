@@ -46,7 +46,7 @@ def _estimate_mean_norms_ML(
 
 
 @torch.no_grad()
-def _collect_norms(
+def collect_norms(
     dataloader_BMLD: Iterator[torch.Tensor],
     device: torch.device,
     n_batches: int,
