@@ -26,6 +26,7 @@ class TopKTrainer:
         crosscoder: AcausalCrosscoder,
         wandb_run: Run | None,
         device: torch.device,
+        layers_to_harvest: list[int],
     ):
         self.cfg = cfg
         self.crosscoder = crosscoder
@@ -34,6 +35,7 @@ class TopKTrainer:
         self.dataloader_BMLD = dataloader_BMLD
         self.wandb_run = wandb_run
         self.device = device
+        self.layers_to_harvest = layers_to_harvest
 
         self.step = 0
 
@@ -89,7 +91,7 @@ class TopKTrainer:
 
         log_dict = {
             "train/reconstruction_loss": reconstruction_loss.item(),
-            **get_explained_var_dict(explained_variance_ML),
+            **get_explained_var_dict(explained_variance_ML, self.layers_to_harvest),
         }
 
         return log_dict

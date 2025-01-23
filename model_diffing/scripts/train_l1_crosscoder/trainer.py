@@ -39,6 +39,7 @@ class L1CrosscoderTrainer:
         crosscoder: AcausalCrosscoder,
         wandb_run: Run | None,
         device: torch.device,
+        layers_to_harvest: list[int],
     ):
         self.cfg = cfg
         self.crosscoder = crosscoder
@@ -47,6 +48,7 @@ class L1CrosscoderTrainer:
         self.wandb_run = wandb_run
         self.device = device
         self.dataloader_BMLD = dataloader_BMLD
+        self.layers_to_harvest = layers_to_harvest
 
         self.step = 0
 
@@ -110,7 +112,7 @@ class L1CrosscoderTrainer:
             "train/reconstruction_loss": reconstruction_loss.item(),
             "train/sparsity_loss": sparsity_loss.item(),
             "train/loss": loss.item(),
-            **get_explained_var_dict(explained_variance_ML),
+            **get_explained_var_dict(explained_variance_ML, self.layers_to_harvest),
         }
 
         return log_dict

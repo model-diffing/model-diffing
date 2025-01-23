@@ -32,11 +32,11 @@ def build_l1_crosscoder_trainer(cfg: L1ExperimentConfig) -> L1CrosscoderTrainer:
 
     return L1CrosscoderTrainer(
         cfg=cfg.train,
-        # optimizer=optimizer,
         dataloader_BMLD=dataloader_BMLD,
         crosscoder=crosscoder,
         wandb_run=wandb_run,
         device=device,
+        layers_to_harvest=cfg.data.activations_harvester.layer_indices_to_harvest,
     )
 
 

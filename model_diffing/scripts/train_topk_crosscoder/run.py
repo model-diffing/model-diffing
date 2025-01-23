@@ -37,6 +37,7 @@ def build_trainer(cfg: TopKExperimentConfig) -> TopKTrainer:
         crosscoder=crosscoder,
         wandb_run=wandb_run,
         device=device,
+        layers_to_harvest=cfg.data.activations_harvester.layer_indices_to_harvest,
     )
 
 
