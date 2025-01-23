@@ -70,7 +70,8 @@ def train_loop(model,model_cfg,train_set,train_labels,test_set,test_labels,save=
 
     train_losses.append(first_train_loss.item()),train_accs.append(first_train_acc.item()),test_losses.append(first_test_loss.item()),test_accs.append(first_test_acc.item())    
     
-    save_dict={}
+    save_dict={"model_cfg":trans_cfg,"data_cfg":data_cfg}
+
     save_dict[0] = {"model": copy.deepcopy(model.state_dict()),
                     "optimiser": copy.deepcopy(optimizer.state_dict()),
                     # 'scheduler': scheduler.state_dict(),
@@ -111,18 +112,25 @@ def train_loop(model,model_cfg,train_set,train_labels,test_set,test_labels,save=
                     "model": copy.deepcopy(model.state_dict()),
                     "optimiser": copy.deepcopy(optimizer.state_dict()),
                     # 'scheduler': scheduler.state_dict(),
-                    "train_acc": train_acc,
-                    "test_acc": test_acc,
-                    "train_loss": train_loss,
-                    "test_loss": test_loss,
+                    "train_accs": train_acc,
+                    "test_accs": test_acc,
+                    "train_losses": train_loss,
+                    "test_losses": test_loss,
                     "epoch": epoch+1,#because I save the first one
                 }
 
-                pbar.set_postfix(acc=f"{100*test_acc:.1f}"+"%")
-                pbar.update(1) 
+                save_dict["train_losses"]=train_losses
+                save_dict["train_accs"]=train_accs
+                save_dict["test_losses"]=test_losses
+                save_dict["test_accs"]=test_accs
+
 
                 if save:
                     torch.save(save_dict,filename)
+                
+                pbar.set_postfix(acc=f"{100*test_acc:.1f}"+"%")
+                pbar.update(1) 
+
                 print(f'Epoch {epoch}:\n Train loss: {train_loss}\n Test loss: {test_loss}\n Train accuracy: {train_acc}\n Test accuracy: {test_acc}')
         
     return model,train_losses,train_accs,test_losses,test_accs
@@ -204,9 +212,11 @@ if __name__=="__main__":
 
     #train the model
 
-    model,train_losses,train_accs,test_losses,test_accs=train_loop(model,trans_cfg,train_set,train_labels,test_set,test_labels,save=False)
+    model,train_losses,train_accs,test_losses,test_accs=train_loop(model,trans_cfg,train_set,train_labels,test_set,test_labels,save=True)
 
     quick_end_plot(train_losses,test_losses,train_accs,test_accs).show()
+
+    
 
     
     
