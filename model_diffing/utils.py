@@ -1,7 +1,5 @@
-from collections.abc import Iterator
 from functools import partial
 from pathlib import Path
-from typing import TypeVar
 
 import einops
 import torch
@@ -14,19 +12,16 @@ from torch import nn
 from wandb.sdk.wandb_run import Run
 
 from model_diffing.log import logger
-from model_diffing.scripts.config_common import BaseExperimentConfig
+from model_diffing.scripts.config_common import WandbConfig
 
 
-def build_wandb_run(cfg: BaseExperimentConfig) -> Run | None:
-    if cfg.wandb == "disabled":
-        return None
-    else:
-        return wandb.init(
-            name=cfg.wandb.name,
-            project=cfg.wandb.project,
-            entity=cfg.wandb.entity,
-            config=cfg.model_dump(),
-        )
+def build_wandb_run(wandb_config: WandbConfig, config: BaseModel) -> Run | None:
+    return wandb.init(
+        name=wandb_config.name,
+        project=wandb_config.project,
+        entity=wandb_config.entity,
+        config=config.model_dump(),
+    )
 
 
 def save_model_and_config(config: BaseModel, save_dir: Path, model: nn.Module, epoch: int) -> None:
@@ -47,18 +42,6 @@ def save_model_and_config(config: BaseModel, save_dir: Path, model: nn.Module, e
     model_file = save_dir / f"model_epoch_{epoch + 1}.pt"
     torch.save(model.state_dict(), model_file)
     logger.info("Saved model to %s", model_file)
-
-
-T = TypeVar("T")
-
-
-def chunk(iterable: Iterator[T], size: int) -> Iterator[list[T]]:
-    chunk: list[T] = []
-    for item in iterable:
-        chunk.append(item)
-        if len(chunk) == size:
-            yield chunk
-            chunk = []
 
 
 # It may seem weird to redefine these, but:

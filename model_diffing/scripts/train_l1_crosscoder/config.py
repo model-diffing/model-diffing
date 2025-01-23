@@ -1,8 +1,9 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
 
-from model_diffing.scripts.config_common import AdamDecayTo0LearningRateConfig, BaseExperimentConfig
+from model_diffing.scripts.config_common import AdamDecayTo0LearningRateConfig, DataConfig, LLMsConfig, WandbConfig
 
 
 class TrainConfig(BaseModel):
@@ -21,6 +22,11 @@ class L1CrosscoderConfig(BaseModel):
     dec_init_norm: float = 0.1
 
 
-class L1ExperimentConfig(BaseExperimentConfig):
+class L1ExperimentConfig(BaseModel):
+    seed: int = 42
+    cache_dir: str = ".cache"
+    data: DataConfig
+    llms: LLMsConfig
+    wandb: WandbConfig | Literal["disabled"] = WandbConfig()
     crosscoder: L1CrosscoderConfig
     train: TrainConfig

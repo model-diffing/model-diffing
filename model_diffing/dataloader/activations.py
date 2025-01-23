@@ -5,21 +5,17 @@ import torch
 from einops import rearrange
 from transformer_lens import HookedTransformer
 
-from model_diffing.utils import chunk
-
 
 class ActivationsHarvester:
     def __init__(
         self,
         llms: list[HookedTransformer],
         layer_indices_to_harvest: list[int],
-        batch_size: int,
-        sequence_tokens_iterator: Iterator[torch.Tensor],
+        token_sequence_iterator_BS: Iterator[torch.Tensor],
     ):
         self._llms = llms
         self._layer_indices_to_harvest = layer_indices_to_harvest
-        self._batch_size = batch_size
-        self._sequence_tokens_iterator = sequence_tokens_iterator
+        self._token_sequence_iterator_BS = token_sequence_iterator_BS
 
     @cached_property
     def names(self) -> list[str]:
@@ -45,8 +41,7 @@ class ActivationsHarvester:
 
     @torch.no_grad()
     def get_token_activations_iterator_MLD(self) -> Iterator[torch.Tensor]:
-        for sequences_chunk in chunk(self._sequence_tokens_iterator, self._batch_size):
-            sequence_tokens_BS = torch.stack(sequences_chunk)
-            activations_BSMLD = self._get_activations_BSMLD(sequence_tokens_BS)
+        for sequences_chunk_BS in self._token_sequence_iterator_BS:
+            activations_BSMLD = self._get_activations_BSMLD(sequences_chunk_BS)
             activations_BsMLD = rearrange(activations_BSMLD, "b s m l d -> (b s) m l d")
             yield from activations_BsMLD

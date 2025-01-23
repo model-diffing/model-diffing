@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -19,33 +19,25 @@ class AdamDecayTo0LearningRateConfig(BaseModel):
 
 
 # there's a nicer way to do this with pydantic discriminators but I think it's over the top for now
-class SequenceTokensIteratorConfig(BaseModel):
+class SequenceIteratorConfig(BaseModel):
     classname: str
     kwargs: dict[str, Any] | None = None
 
 
-class ActivationsIteratorConfig(BaseModel):
+class ActivationsHarvesterConfig(BaseModel):
     layer_indices_to_harvest: list[int]
     harvest_batch_size: int
-    sequence_tokens_iterator: SequenceTokensIteratorConfig
-    sequence_shuffler_buffer_size: int
 
 
 class DataConfig(BaseModel):
-    activations_iterator: ActivationsIteratorConfig
-    shuffle_buffer_size: int
-    batch_size: int
+    sequence_iterator: SequenceIteratorConfig
+    sequence_shuffle_buffer_size: int
+    activations_harvester: ActivationsHarvesterConfig
+    activations_shuffle_buffer_size: int
+    cc_training_batch_size: int
 
 
 class WandbConfig(BaseModel):
     name: str | None = None
     project: str = "model-diffing"
     entity: str = "mars-model-diffing"
-
-
-class BaseExperimentConfig(BaseModel):
-    seed: int = 42
-    cache_dir: str = ".cache"
-    data: DataConfig
-    llms: LLMsConfig
-    wandb: WandbConfig | Literal["disabled"] = WandbConfig()

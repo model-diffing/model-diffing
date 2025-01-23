@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import fire
-import torch
 import yaml
 
 from model_diffing.dataloader.data import build_dataloader_BMLD
@@ -21,23 +20,15 @@ def build_l1_crosscoder_trainer(cfg: L1ExperimentConfig) -> L1CrosscoderTrainer:
     dataloader_BMLD = build_dataloader_BMLD(cfg.data, llms, cfg.cache_dir)
 
     crosscoder = build_relu_crosscoder(
-        n_layers=len(cfg.data.activations_iterator.layer_indices_to_harvest),
+        n_layers=len(cfg.data.activations_harvester.layer_indices_to_harvest),
         d_model=llms[0].cfg.d_model,
         cc_hidden_dim=cfg.crosscoder.hidden_dim,
         dec_init_norm=cfg.crosscoder.dec_init_norm,
         n_models=len(llms),
     )
-
-    # initalise weights indentically for each model
-    with torch.no_grad():
-        crosscoder.W_enc_MLDH[1] = crosscoder.W_enc_MLDH[0]
-        crosscoder.W_dec_HMLD[:, 1] = crosscoder.W_dec_HMLD[:, 0]
-        crosscoder.b_dec_MLD[1] = crosscoder.b_dec_MLD[0]
-        # no_need to alter b_enc, it's not model-specific
-
     crosscoder = crosscoder.to(device)
 
-    wandb_run = build_wandb_run(cfg)
+    wandb_run = build_wandb_run(cfg.wandb, cfg) if cfg.wandb != "disabled" else None
 
     return L1CrosscoderTrainer(
         cfg=cfg.train,
