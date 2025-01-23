@@ -1,5 +1,7 @@
 import plotly.express as px
 import plotly.graph_objs as go
+import plotly.io as pio
+from PIL import Image
 import torch
 
 from model_diffing.analysis import metrics
@@ -27,7 +29,15 @@ def plot_relative_norms(vectors_a: torch.Tensor, vectors_b: torch.Tensor, title:
 
     fig.update_layout(showlegend=False)
     fig.update_yaxes(title_text="Number of Latents")
-    fig.update_xaxes(tickvals=[0, 0.25, 0.5, 0.75, 1.0], ticktext=["0", "0.25", "0.5", "0.75", "1.0"])
+    fig.update_layout(
+        showlegend=False,
+        xaxis=dict(
+            range=[0, 1],  # Ensures x-axis always spans 0 to 1
+            tickvals=[0, 0.25, 0.5, 0.75, 1.0],  # Sets specific tick positions
+            ticktext=["0", "0.25", "0.5", "0.75", "1.0"],  # Tick labels
+        )
+    )
+
     return fig
 
 

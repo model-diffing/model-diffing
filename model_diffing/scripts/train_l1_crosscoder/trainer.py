@@ -107,7 +107,7 @@ class L1SaeTrainer:
             "train/sparsity_loss": loss_info.sparsity_loss,
             "train/loss": loss.item(),
         }
-
+        print(log_dict)
         return log_dict
 
     def _get_loss(self, activations_BMLD: torch.Tensor) -> tuple[torch.Tensor, "L1LossInfo"]:

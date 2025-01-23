@@ -18,3 +18,4 @@ class WandbConfig(BaseModel):
 class LLMConfig(BaseModel):
     name: str
     revision: str | None
+    d_model: int

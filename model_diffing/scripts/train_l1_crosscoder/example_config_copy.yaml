@@ -3,8 +3,10 @@ dtype: float32
 llms:
   - name: google/gemma-2-2b
     revision: null
+    d_model : 2304
   - name: google/gemma-2-2b-it
     revision: null
+    d_model : 2304
 layer_indices_to_harvest:
   - 14
 dataset:
@@ -20,7 +22,7 @@ train:
   learning_rate:
     initial_learning_rate: 5e-5
     last_pct_of_steps: 0.2
-  lambda_max: 5
+  lambda_max: 7.5
   lambda_n_steps: 1000
   batch_size: 4096
   num_steps: 100_000
