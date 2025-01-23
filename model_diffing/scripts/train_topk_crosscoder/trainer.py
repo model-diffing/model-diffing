@@ -65,7 +65,7 @@ class TopKTrainer:
             log_dict = self._train_step(batch_BMLD)
 
             if self.wandb_run and (self.step + 1) % self.cfg.log_every_n_steps == 0:
-                self.wandb_run.log(log_dict)
+                self.wandb_run.log(log_dict, step=self.step)
 
             if self.cfg.save_dir and self.cfg.save_every_n_steps and (self.step + 1) % self.cfg.save_every_n_steps == 0:
                 save_model_and_config(
@@ -89,7 +89,6 @@ class TopKTrainer:
         self.optimizer.param_groups[0]["lr"] = self._lr_scheduler()
 
         log_dict = {
-            "train/step": self.step,
             "train/reconstruction_loss": loss.item(),
         }
 

@@ -74,7 +74,7 @@ class L1CrosscoderTrainer:
             log_dict = self._train_step(batch_BMLD)
 
             if self.wandb_run and (self.step + 1) % self.cfg.log_every_n_steps == 0:
-                self.wandb_run.log(log_dict)
+                self.wandb_run.log(log_dict, step=self.step)
 
             if self.cfg.save_dir and self.cfg.save_every_n_steps and (self.step + 1) % self.cfg.save_every_n_steps == 0:
                 save_model_and_config(
@@ -98,7 +98,6 @@ class L1CrosscoderTrainer:
         self.optimizer.param_groups[0]["lr"] = self._lr_scheduler()
 
         log_dict = {
-            "train/step": self.step,
             "train/l1_coef": loss_info.l1_coef,
             "train/mean_l0": loss_info.mean_l0,
             "train/mean_l0_pct": loss_info.mean_l0 / self.crosscoder.hidden_dim,
