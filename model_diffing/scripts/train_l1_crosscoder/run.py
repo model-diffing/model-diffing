@@ -37,15 +37,11 @@ def build_l1_crosscoder_trainer(cfg: L1ExperimentConfig) -> L1CrosscoderTrainer:
 
     crosscoder = crosscoder.to(device)
 
-    initial_lr = cfg.train.learning_rate.initial_learning_rate
-    optimizer = torch.optim.Adam(crosscoder.parameters(), lr=initial_lr)
-
     wandb_run = build_wandb_run(cfg)
 
     return L1CrosscoderTrainer(
         cfg=cfg.train,
-        llms=llms,
-        optimizer=optimizer,
+        # optimizer=optimizer,
         dataloader_BMLD=dataloader_BMLD,
         crosscoder=crosscoder,
         wandb_run=wandb_run,

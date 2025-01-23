@@ -109,7 +109,10 @@ def weighted_l1_sparsity_loss(
 
     # to get the weighting factor for each latent, we reduce it's decoder norms for each (model, layer)
     reduced_norms_H = multi_reduce(
-        W_dec_l2_norms_HML, "hidden model layer", [("layer", layer_reduction), ("model", model_reduction)]
+        W_dec_l2_norms_HML,
+        "hidden model layer",
+        ("layer", layer_reduction),
+        ("model", model_reduction),
     )
 
     # now we weight the latents by the sum of their norms
@@ -131,7 +134,7 @@ sparsity_loss_l1_of_norms = partial(
 )
 
 
-def reconstruction_loss(activation_BMLD: torch.Tensor, target_BMLD: torch.Tensor) -> torch.Tensor:
+def calculate_reconstruction_loss(activation_BMLD: torch.Tensor, target_BMLD: torch.Tensor) -> torch.Tensor:
     """This is a little weird because we have both model and layer dimensions, so it's worth explaining deeply:
 
     The reconstruction loss is a sum of squared L2 norms of the error for each activation space being reconstructed.
@@ -158,7 +161,7 @@ def get_device() -> torch.device:
 def multi_reduce(
     tensor: torch.Tensor,
     shape_pattern: str,
-    reductions: list[tuple[str, Reduction]],  # type: ignore
+    *reductions: tuple[str, Reduction],  # type: ignore
 ) -> torch.Tensor:
     original_shape = einops.parse_shape(tensor, shape_pattern)
     for reduction_dim, reduction_fn in reductions:
@@ -170,3 +173,29 @@ def multi_reduce(
         tensor = reduce(tensor, exec_pattern, reduction_fn)
 
     return tensor
+
+
+def calculate_explained_variance_ML(
+    activations_BMLD: torch.Tensor,
+    reconstructed_BMLD: torch.Tensor,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """for each model and layer, calculate the mean explained variance inside each d_model feature space"""
+    error_BMLD = activations_BMLD - reconstructed_BMLD
+
+    mean_error_var_ML = error_BMLD.var(-1).mean(0)
+    mean_activations_var_ML = activations_BMLD.var(-1).mean(0)
+
+    explained_var_ML = 1 - (mean_error_var_ML / (mean_activations_var_ML + eps))
+    return explained_var_ML
+
+
+def get_explained_var_dict(explained_variance_ML: torch.Tensor) -> dict[str, float]:
+    num_models, num_layers = explained_variance_ML.shape
+    explained_variances_dict = {
+        f"train/explained_variance/M{model_idx}_L{layer_idx}": explained_variance_ML[model_idx, layer_idx].item()
+        for model_idx in range(num_models)
+        for layer_idx in range(num_layers)
+    }
+
+    return explained_variances_dict

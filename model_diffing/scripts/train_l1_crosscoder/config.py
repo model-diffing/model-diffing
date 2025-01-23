@@ -2,16 +2,11 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from model_diffing.scripts.config_common import BaseExperimentConfig
-
-
-class DecayTo0LearningRateConfig(BaseModel):
-    initial_learning_rate: float
-    last_pct_of_steps: float = 0.2
+from model_diffing.scripts.config_common import AdamDecayTo0LearningRateConfig, BaseExperimentConfig
 
 
 class TrainConfig(BaseModel):
-    learning_rate: DecayTo0LearningRateConfig
+    optimizer: AdamDecayTo0LearningRateConfig
     l1_coef_max: float = 5.0
     l1_coef_n_steps: int = 1000
     num_steps: int

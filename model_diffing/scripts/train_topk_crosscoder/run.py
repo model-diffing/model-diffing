@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import fire
-import torch
 import yaml
 
 from model_diffing.dataloader.data import build_dataloader_BMLD
@@ -30,15 +29,10 @@ def build_trainer(cfg: TopKExperimentConfig) -> TopKTrainer:
     )
     crosscoder = crosscoder.to(device)
 
-    initial_lr = cfg.train.learning_rate.initial_learning_rate
-    optimizer = torch.optim.Adam(crosscoder.parameters(), lr=initial_lr)
-
     wandb_run = build_wandb_run(cfg)
 
     return TopKTrainer(
         cfg=cfg.train,
-        llms=llms,
-        optimizer=optimizer,
         dataloader_BMLD=dataloader_BMLD,
         crosscoder=crosscoder,
         wandb_run=wandb_run,

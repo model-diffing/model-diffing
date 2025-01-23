@@ -13,6 +13,11 @@ class LLMsConfig(BaseModel):
     inference_dtype: str = "float32"
 
 
+class AdamDecayTo0LearningRateConfig(BaseModel):
+    initial_learning_rate: float
+    last_pct_of_steps: float = 0.2
+
+
 # there's a nicer way to do this with pydantic discriminators but I think it's over the top for now
 class SequenceTokensIteratorConfig(BaseModel):
     classname: str
@@ -23,6 +28,7 @@ class ActivationsIteratorConfig(BaseModel):
     layer_indices_to_harvest: list[int]
     harvest_batch_size: int
     sequence_tokens_iterator: SequenceTokensIteratorConfig
+    sequence_shuffler_buffer_size: int
 
 
 class DataConfig(BaseModel):
