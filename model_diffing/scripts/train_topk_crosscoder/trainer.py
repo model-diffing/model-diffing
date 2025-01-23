@@ -38,6 +38,7 @@ class TopKTrainer:
         self.layers_to_harvest = layers_to_harvest
 
         self.step = 0
+        self.tokens_trained = 0
 
     def train(self):
         logger.info("Estimating norm scaling factors (model, layer)")
@@ -78,19 +79,26 @@ class TopKTrainer:
     def _train_step(self, batch_BMLD: torch.Tensor) -> dict[str, float]:
         self.optimizer.zero_grad()
 
+        # fwd
         train_res = self.crosscoder.forward_train(batch_BMLD)
+        self.tokens_trained += batch_BMLD.shape[0]
+
+        # losses
         reconstruction_loss = calculate_reconstruction_loss(batch_BMLD, train_res.reconstructed_acts_BMLD)
+
+        # backward
         reconstruction_loss.backward()
         clip_grad_norm_(self.crosscoder.parameters(), 1.0)
         self.optimizer.step()
         self.optimizer.param_groups[0]["lr"] = self.lr_scheduler(self.step)
 
+        # metrics
         explained_variance_ML = calculate_explained_variance_ML(batch_BMLD, train_res.reconstructed_acts_BMLD)
-
         # is measuring l0 meaningful here?
 
         log_dict = {
             "train/reconstruction_loss": reconstruction_loss.item(),
+            "train/tokens_trained": self.tokens_trained,
             **get_explained_var_dict(explained_variance_ML, self.layers_to_harvest),
         }
 
