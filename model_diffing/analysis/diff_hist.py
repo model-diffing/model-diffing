@@ -41,7 +41,6 @@ def plot_relative_norms(vectors_a: torch.Tensor, vectors_b: torch.Tensor, title:
     # Compute relative norms
     relative_norms = metrics.compute_relative_norms(vectors_a, vectors_b)
     relative_norms_np = relative_norms.detach().cpu().numpy()
-
     # Create histogram
     plt.figure(figsize=(8, 6))
     plt.hist(relative_norms_np, bins=200, color='blue', alpha=0.7, edgecolor='black')
@@ -85,11 +84,11 @@ def build_hist(cfg: Config , checkpoint_path: str):
     W_dec_HMLD = W_dec_HMLD[:,:,layer,]
 
     # want weights DH
-    base_model = W_dec_HMLD[0].T
-    ft_model = W_dec_HMLD[1].T
+    base_model = W_dec_HMLD[0]
+    ft_model = W_dec_HMLD[1]
 
     relative_norms = metrics.compute_relative_norms(base_model, ft_model)
-
+    print('relative_norms', len(relative_norms))
  
     plot_relative_norms(base_model, ft_model, title="Relative Norms Histogram") 
 
