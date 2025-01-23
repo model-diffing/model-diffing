@@ -21,19 +21,19 @@ def batch_shuffle_tensor_iterator_BX(
     if shuffle_buffer_size < yield_batch_size * 4:
         logger.warning("shuffle_buffer_size is less than 4x yield_batch_size, this may lead to poor shuffling")
 
-    sample_tensor_X = next(tensor_iterator_X)  # this "wastes" an example. This is ok.
+    first_tensor_X = next(tensor_iterator_X)  # this "wastes" an example. This is ok.
 
     buffer_BfX = torch.empty(
-        (shuffle_buffer_size, *sample_tensor_X.shape),
-        device=sample_tensor_X.device,
-        dtype=sample_tensor_X.dtype,
+        (shuffle_buffer_size, *first_tensor_X.shape),
+        device=first_tensor_X.device,
+        dtype=first_tensor_X.dtype,
     )
-
     buffer_size_bytes = buffer_BfX.numel() * buffer_BfX.element_size()
     logger.info(f"shuffle buffer size: {buffer_size_bytes / 1e9:.2f} GB")
 
-    available_indices = set()
-    stale_indices = set(range(shuffle_buffer_size))
+    buffer_BfX[0] = first_tensor_X
+    available_indices = {0}
+    stale_indices = set(range(1, shuffle_buffer_size))
 
     def sample_BX():
         batch_indices = random.sample(list(available_indices), yield_batch_size)
@@ -48,13 +48,13 @@ def batch_shuffle_tensor_iterator_BX(
             available_indices.add(stale_idx)
             stale_indices.remove(stale_idx)
 
-        if len(available_indices) < shuffle_buffer_size // 2:
+        if len(available_indices) <= shuffle_buffer_size // 2:
             # This means the buffer wasn't refilled above. therefore the iterator is exhausted
             # so we yield the remaining activations
-            while len(available_indices) > yield_batch_size:
+            while len(available_indices) >= yield_batch_size:
                 yield sample_BX()
             break
 
         # yield batches until buffer is half empty
-        while len(available_indices) >= shuffle_buffer_size // 2:
+        while len(available_indices) > shuffle_buffer_size // 2:
             yield sample_BX()

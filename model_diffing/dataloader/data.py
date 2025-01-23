@@ -5,7 +5,7 @@ from transformer_lens import HookedTransformer
 from transformers import PreTrainedTokenizerBase
 
 from model_diffing.dataloader.activations import ActivationsHarvester
-from model_diffing.dataloader.shuffler import batch_shuffle_tensor_iterator_BX
+from model_diffing.dataloader.shuffle import batch_shuffle_tensor_iterator_BX
 from model_diffing.dataloader.token_loader import (
     CommonCorpusTokenSequenceIterator,
     ConnorGemma2TokenSequenceLoader,
