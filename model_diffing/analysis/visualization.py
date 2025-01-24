@@ -11,7 +11,6 @@ def create_visualizations(W_dec_HMLD: torch.Tensor, layers: list[int]) -> dict[s
     H, M, L, D = W_dec_HMLD.shape
     assert M == 2, "only two models are supported currently"
 
-    # subplots = make_subplots(rows=L, cols=2)
     plots = {}
 
     for layer_idx in range(L):
@@ -22,7 +21,7 @@ def create_visualizations(W_dec_HMLD: torch.Tensor, layers: list[int]) -> dict[s
         relative_norms_fig = plot_relative_norms(a_HD, b_HD, title=f"Relative Norms. Layer {layer_name}")
         plots[f"relative_decoder_norms_layer_{layer_name}"] = relative_norms_fig
 
-        cosine_sim_fig = cosine_sim_hist(
+        cosine_sim_fig = plot_cosine_sim(
             metrics.compute_cosine_similarities_N(a_HD, b_HD), title=f"Cosine Similarity. Layer {layer_name}"
         )
         plots[f"cosine_sim_layer_{layer_name}"] = cosine_sim_fig
@@ -43,18 +42,7 @@ def plot_relative_norms(vectors_a: torch.Tensor, vectors_b: torch.Tensor, title:
     """
     relative_norms = metrics.compute_relative_norms_N(vectors_a, vectors_b)
 
-    fig = px.histogram(
-        relative_norms.detach().cpu().numpy(),
-        nbins=200,
-        labels={"value": "Relative norm"},
-        title=title,
-        range_x=[0, 1],
-    )
-
-    fig.update_layout(showlegend=False)
-    fig.update_yaxes(title_text="Number of Latents")
-    fig.update_xaxes(tickvals=[0, 0.25, 0.5, 0.75, 1.0], ticktext=["0", "0.25", "0.5", "0.75", "1.0"])
-    return fig
+    return relative_norms_hist(relative_norms, title=title)
 
 
 def relative_norms_hist(relative_norms_N: torch.Tensor, title: str | None = None) -> go.Figure:
@@ -72,7 +60,7 @@ def relative_norms_hist(relative_norms_N: torch.Tensor, title: str | None = None
     return fig
 
 
-def cosine_sim_hist(cosine_sims_N: torch.Tensor, title: str | None = None) -> go.Figure:
+def plot_cosine_sim(cosine_sims_N: torch.Tensor, title: str | None = None) -> go.Figure:
     """Plot histogram of cosine similarities.
 
     Args:
