@@ -72,7 +72,7 @@ def plot_cosine_sim(cosine_sims_N: torch.Tensor, title: str | None = None) -> go
     """
     fig = px.histogram(
         cosine_sims_N.detach().cpu().numpy(),
-        # log_y=True,
+        log_y=True,
         range_x=[-1, 1],
         nbins=100,
         labels={"value": "Cosine similarity"},
