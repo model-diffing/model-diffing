@@ -1,25 +1,30 @@
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
+# sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
 
-from models.ma_transformer import Transformer,TransformerConfig
-from dataloader.ma_dataset import datacfg,gen_train_test,get_is_train_test
+from model_diffing.models.ma_transformer import Transformer,TransformerConfig
+from model_diffing.dataloader.ma_dataset import datacfg,gen_train_test,get_is_train_test
 import copy
 from datetime import datetime
 from tqdm import tqdm
 
 device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-import matplotlib.pyplot as plt
-from IPython.display import clear_output
+#import matplotlib.pyplot as plt
+#from IPython.display import clear_output
 
 import plotly.colors as plc
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
+import argparse
+
+parser = argparse.ArgumentParser()
+
 
 
 
@@ -87,6 +92,7 @@ def train_loop(model,model_cfg,train_set,train_labels,test_set,test_labels,save=
         filename=f'{save_dir}/train_P_{model_cfg.P}_tf_{data_cfg.train_frac}_lr_{model_cfg.lr}_{stripped_start_time}.pt'
         
         torch.save(save_dict,filename)
+        print(f'Saved model to:\n {filename}')
     with tqdm(total=model_cfg.epochs, desc="Training") as pbar:
         for epoch in range(model_cfg.epochs):
             optimizer.zero_grad()
@@ -174,14 +180,21 @@ def quick_end_plot(train_losses,test_losses,train_accs,test_accs):
 
 if __name__=="__main__":
     print('the main character')
-    save_dir='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data'
+
+    #Input args
+
+    parser.add_argument('--P', type=int, default=23, help='P value')
+    args = parser.parse_args()
+    print(f'the P value you are running is: {args.P}')
+    P=args.P
+    save_dir=f'/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/models/{P}'
     #Initialize the model
     trans_cfg = TransformerConfig(
-        P=23,
+        P=P,
         lr=1e-3,
         weight_decay=1e-5,
-        epochs=5000,
-        save_interval=100,
+        epochs=10000,
+        save_interval=1000,
     )
     model = Transformer(trans_cfg)
     print(f'Transformer model:\n {model}')
@@ -189,7 +202,7 @@ if __name__=="__main__":
 
     #Load in the data
     data_cfg=datacfg(
-        P=23,
+        P=P,
         num=1,
         data_seed=0,
         train_frac=0.8
