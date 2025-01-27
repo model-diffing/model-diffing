@@ -14,8 +14,8 @@ llm:
   base_model_repo: "roneneldan/TinyStories-Instruct-33M"
   lora_model_repo: "mars-jason-25/tiny-stories-33M-ft1"
 wandb:
-  project: "crosscoder_replication"
-  entity: thjread-university-of-warwick
+  project: "sleeper-model-diffing"
+  entity: dmitry2-uiuc
   name: "crosscoder_D"
 crosscoder:
   hidden_dim: 1536
