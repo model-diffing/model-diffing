@@ -1,17 +1,12 @@
 data:
   sequence_iterator:
-    batch_size: 16
-    classname: CommonCorpusTokenSequenceIterator
-    kwargs:
-      sequence_length: 256
-      sequence_shuffle_buffer_size: 16_384
+    batch_size: 32
+    classname: ConnorGemma2TokenSequenceLoader
   activations_harvester:
     llms:
-      - name: EleutherAI/pythia-160M
-        revision: step142000
-      - name: EleutherAI/pythia-160M
-        revision: step143000 # last checkpoint
-    layer_indices_to_harvest: [2]
+      - name: google/gemma-2-2b
+      - name: google/gemma-2-2b-it
+    layer_indices_to_harvest: [13]
   activations_shuffle_buffer_size: 8_192
   cc_training_batch_size: 512
 crosscoder:
