@@ -1,5 +1,4 @@
-from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -7,8 +6,6 @@ from pydantic import BaseModel
 class LLMConfig(BaseModel):
     name: str
     revision: str | None = None
-
-
 
 
 class AdamDecayTo0LearningRateConfig(BaseModel):
@@ -58,6 +55,7 @@ class BaseExperimentConfig(BaseModel):
     wandb: bool = False
     name: str
 
+
 __DEMO = BaseExperimentConfig(
     data=DataConfig(
         sequence_iterator=SequenceIteratorConfig(
@@ -70,10 +68,10 @@ __DEMO = BaseExperimentConfig(
         ),
         activations_harvester=ActivationsHarvesterConfig(
             llms=[
-                    LLMConfig(
-                        name="gpt2",
-                    ),
-                ],
+                LLMConfig(
+                    name="gpt2",
+                ),
+            ],
             layer_indices_to_harvest=[0, 3, 7, 9, 11],
         ),
         activations_shuffle_buffer_size=1000,

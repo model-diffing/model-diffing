@@ -1,15 +1,14 @@
 from abc import abstractmethod
-from collections.abc import Iterator
 from itertools import islice
 from typing import Literal
 
 import torch
 import wandb
-from einops import einsum, rearrange
+from einops import rearrange
 from wandb.sdk.wandb_run import Run
 
 from model_diffing.analysis.visualization import create_visualizations
-from model_diffing.dataloader.activations import ActivationsDataloader, BaseActivationsDataloader
+from model_diffing.dataloader.activations import BaseActivationsDataloader
 from model_diffing.log import logger
 from model_diffing.models.crosscoder import AcausalCrosscoder
 from model_diffing.scripts.config_common import BaseTrainConfig

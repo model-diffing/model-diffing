@@ -14,7 +14,8 @@ class TokenSequenceLoader(ABC):
     def get_sequences_batch_iterator(self) -> Iterator[torch.Tensor]: ...
 
     @abstractmethod
-    def num_batches(self) -> int | None: ... # not using __len__ because __len__ doesn't work well with `| None`
+    def num_batches(self) -> int | None: ...  # not using __len__ because __len__ doesn't work well with `| None`
+
 
 class CommonCorpusTokenSequenceLoader(TokenSequenceLoader):
     COMMON_CORPUS_HF_DATASET = "PleIAs/common_corpus"
@@ -59,11 +60,12 @@ class CommonCorpusTokenSequenceLoader(TokenSequenceLoader):
             shuffle_buffer_size=self._shuffle_buffer_size,
             yield_batch_size=self._batch_size,
         )
-    
+
     def num_batches(self) -> int | None:
         # This kind of can't easily be computed, because it's a function of sequence length and each example's length
         # This is a good example of why `num_batches` is `None`able
-        return None 
+        return None
+
 
 class ToyOverfittingTokenSequenceLoader(TokenSequenceLoader):
     def __init__(self, batch_size: int, sequence_length: int):
@@ -83,7 +85,6 @@ class ConnorGemma2TokenSequenceLoader(TokenSequenceLoader):
     SEQUENCE_LENGTH = 1024
     N_ROWS = 963_566
 
-
     def __init__(self, cache_dir: str, batch_size: int):
         """expects a tokenised huggingface dataset"""
         self._cache_dir = cache_dir
@@ -93,7 +94,7 @@ class ConnorGemma2TokenSequenceLoader(TokenSequenceLoader):
         """accumulate sequences into batches, yielding batches of shape (B, S)"""
         buffer = torch.empty((self._batch_size, self.SEQUENCE_LENGTH))
         pos = 0
-        
+
         for sequence in sequence_iterator:
             buffer[pos] = sequence
             pos += 1
@@ -103,17 +104,20 @@ class ConnorGemma2TokenSequenceLoader(TokenSequenceLoader):
 
     def get_sequences_batch_iterator(self) -> Iterator[torch.Tensor]:
         dataset = load_dataset(
-            self.HF_TOKENISED_DATASET, 
-            streaming=True, 
-            cache_dir=self._cache_dir, 
-            split="train", 
+            self.HF_TOKENISED_DATASET,
+            streaming=True,
+            cache_dir=self._cache_dir,
+            split="train",
             batch_size=self._batch_size,
         )
-        sequence_iterator = (torch.tensor(tokens_S["input_ids"]) for tokens_S in cast(Iterator[dict[str, Any]], dataset))
+        sequence_iterator = (
+            torch.tensor(tokens_S["input_ids"]) for tokens_S in cast(Iterator[dict[str, Any]], dataset)
+        )
         return self._batch_accumulator(sequence_iterator)
 
     def num_batches(self) -> int | None:
         return self.N_ROWS // self._batch_size
+
 
 # For example, we could do:
 # class LocalDatasetTokenSequenceIterator(TokenSequenceIterator):
@@ -146,7 +150,7 @@ class ConnorGemma2TokenSequenceLoader(TokenSequenceLoader):
 
 if __name__ == "__main__":
     from itertools import islice
+
     token_loader = ConnorGemma2TokenSequenceLoader(cache_dir=".cache", batch_size=16)
     for tokens in islice(token_loader.get_sequences_batch_iterator(), 10):
         print(tokens.shape)
-
