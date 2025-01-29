@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 import torch
@@ -12,6 +13,8 @@ from model_diffing.utils import get_device
 
 
 class TestTrainer(BaseTrainer[BaseTrainConfig]):
+    __test__ = False
+
     def _train_step(self, batch_BMLD: Tensor) -> dict[str, float]:
         return {
             "loss": 0.0,
@@ -19,6 +22,8 @@ class TestTrainer(BaseTrainer[BaseTrainConfig]):
 
 
 class FakeActivationsDataloader(BaseActivationsDataloader):
+    __test__ = False
+
     def __init__(
         self,
         batch_size: int = 16,
@@ -56,12 +61,13 @@ def opt():
 @pytest.mark.parametrize(
     "train_cfg",
     [
-        BaseTrainConfig(epochs=10, optimizer=opt()),
-        BaseTrainConfig(num_steps_per_epoch=100, optimizer=opt()),
+        BaseTrainConfig(epochs=2, optimizer=opt()),
+        BaseTrainConfig(epochs=2, num_steps_per_epoch=10, optimizer=opt()),
+        BaseTrainConfig(num_steps=10, optimizer=opt()),
     ],
 )
 def test_trainer_epochs_steps(train_cfg: BaseTrainConfig) -> None:
-    batch_size = 16
+    batch_size = 4
     n_models = 1
     layer_indices_to_harvest = [0]
     n_layers = len(layer_indices_to_harvest)
@@ -75,6 +81,7 @@ def test_trainer_epochs_steps(train_cfg: BaseTrainConfig) -> None:
         d_model=d_model,
         num_batches=num_batches,
     )
+
     crosscoder = build_relu_crosscoder(
         n_models=n_models,
         n_layers=n_layers,
@@ -96,66 +103,46 @@ def test_trainer_epochs_steps(train_cfg: BaseTrainConfig) -> None:
     trainer.train()
 
 
-def test_validate_num_steps_per_epoch_returns_num_steps_per_epoch_if_less_than_dataloader_num_batches() -> None:
-    # WHEN num_steps_per_epoch is less than the number of batches in the dataloader,
-    given_num_steps_per_epoch = 100
-    dataloader_num_batches = 101
-    cfg = BaseTrainConfig(epochs=10, num_steps_per_epoch=given_num_steps_per_epoch, optimizer=opt())
+@pytest.mark.parametrize(
+    "epochs, num_steps_per_epoch, dataloader_num_batches, expected",
+    [
+        # WHEN num_steps_per_epoch < dataloader_num_batches (should return num_steps_per_epoch)
+        (10, 100, 200, 100),
+        # WHEN num_steps_per_epoch > dataloader_num_batches (should return dataloader_num_batches)
+        (10, 200, 100, 100),
+        # WHEN epochs is provided but num_steps_per_epoch is not (should return dataloader_num_batches)
+        (10, None, 100, 100),
+    ],
+)
+def test_validate_num_steps_per_epoch_happy_path(
+    epochs: int,
+    num_steps_per_epoch: int | None,
+    dataloader_num_batches: int,
+    expected: int,
+) -> None:
     activations_dataloader = FakeActivationsDataloader(num_batches=dataloader_num_batches)
-
-    # THEN it should return num_steps_per_epoch, effectively cropping the dataloader
-    assert validate_num_steps_per_epoch(cfg, activations_dataloader) == given_num_steps_per_epoch
-
-
-def test_validate_num_steps_per_epoch_returns_dataloader_num_batches_if_num_steps_per_epoch_is_greater_than_dataloader_num_batches() -> (
-    None
-):
-    # WHEN num_steps_per_epoch is greater than the number of batches in the dataloader,
-    given_num_steps_per_epoch = 101
-    dataloader_num_batches = 100
-    cfg = BaseTrainConfig(epochs=10, num_steps_per_epoch=given_num_steps_per_epoch, optimizer=opt())
-    activations_dataloader = FakeActivationsDataloader(num_batches=dataloader_num_batches)
-
-    # THEN it should just use the number of batches in the dataloader
-    assert validate_num_steps_per_epoch(cfg, activations_dataloader) == dataloader_num_batches
+    num_steps_per_epoch = validate_num_steps_per_epoch(epochs, num_steps_per_epoch, None, activations_dataloader)
+    assert num_steps_per_epoch == expected
 
 
-def test_validate_num_steps_per_epoch_works_if_epochs_but_not_num_steps_per_epoch_are_provided() -> None:
-    # WHEN using epochs, we don't necessarily need to provide num_steps_per_epoch
-    num_epochs = 10
-    num_batches_in_dataloader = 30
-    cfg = BaseTrainConfig(epochs=num_epochs, optimizer=opt())
-    activations_dataloader = FakeActivationsDataloader(num_batches=num_batches_in_dataloader)
-
-    # THEN it should just use the number of batches in the dataloader
-    assert validate_num_steps_per_epoch(cfg, activations_dataloader) == num_batches_in_dataloader * num_epochs
-
-
-def test_validate_num_steps_per_epoch_raises_error_if_num_steps_per_epoch_but_not_epochs_are_provided() -> None:
-    # WHEN num_steps_per_epoch is provided but not epochs,
-    cfg = BaseTrainConfig(num_steps_per_epoch=100, optimizer=opt())
+@pytest.mark.parametrize(
+    "epochs, num_steps_per_epoch, num_steps, should_raise",
+    [
+        # WHEN num_steps_per_epoch is provided but not epochs
+        (None, 100, None, ValueError),
+        # WHEN both epochs and num_steps are provided
+        (10, None, 100, ValueError),
+        # WHEN neither epochs nor num_steps are provided
+        (None, None, None, ValueError),
+    ],
+)
+def test_validate_num_steps_per_epoch_errors(
+    epochs: int | None,
+    num_steps_per_epoch: int | None,
+    num_steps: int | None,
+    should_raise: type[Exception],
+) -> None:
     activations_dataloader = FakeActivationsDataloader(num_batches=99999)
 
-    # THEN it should raise an error
-    with pytest.raises(ValueError):
-        validate_num_steps_per_epoch(cfg, activations_dataloader)
-
-
-def test_validate_num_steps_per_epoch_raises_error_if_epochs_and_num_steps_are_provided() -> None:
-    # WHEN both epochs and num_steps are provided,
-    cfg = BaseTrainConfig(epochs=10, num_steps=100, optimizer=opt())
-    activations_dataloader = FakeActivationsDataloader(num_batches=99999)
-
-    # THEN it should raise an error
-    with pytest.raises(ValueError):
-        validate_num_steps_per_epoch(cfg, activations_dataloader)
-
-
-def test_validate_num_steps_per_epoch_raises_error_nothing_provided() -> None:
-    # WHEN neither epochs nor num_steps are provided,
-    cfg = BaseTrainConfig(optimizer=opt())
-    activations_dataloader = FakeActivationsDataloader(num_batches=99999)
-
-    # THEN it should raise an error
-    with pytest.raises(ValueError):
-        validate_num_steps_per_epoch(cfg, activations_dataloader)
+    with pytest.raises(should_raise):
+        validate_num_steps_per_epoch(epochs, num_steps_per_epoch, num_steps, activations_dataloader)

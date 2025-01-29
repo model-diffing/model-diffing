@@ -42,7 +42,9 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
 
         self.epochs = cfg.epochs
 
-        self.num_steps_per_epoch = validate_num_steps_per_epoch(cfg, activations_dataloader)
+        self.num_steps_per_epoch = validate_num_steps_per_epoch(
+            cfg.epochs, cfg.num_steps_per_epoch, cfg.num_steps, activations_dataloader
+        )
 
         self.lr_scheduler = build_lr_scheduler(cfg.optimizer, self.num_steps_per_epoch)
 
@@ -129,9 +131,14 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
     def _train_step(self, batch_BMLD: torch.Tensor) -> dict[str, float]: ...
 
 
-def validate_num_steps_per_epoch(cfg: BaseTrainConfig, activations_dataloader: BaseActivationsDataloader) -> int:
-    if cfg.epochs is not None:
-        if cfg.num_steps is not None:
+def validate_num_steps_per_epoch(
+    epochs: int | None,
+    num_steps_per_epoch: int | None,
+    num_steps: int | None,
+    activations_dataloader: BaseActivationsDataloader,
+) -> int:
+    if epochs is not None:
+        if num_steps is not None:
             raise ValueError("num_steps must not be provided if using epochs")
 
         dataloader_num_batches = activations_dataloader.num_batches()
@@ -141,22 +148,22 @@ def validate_num_steps_per_epoch(cfg: BaseTrainConfig, activations_dataloader: B
                 "as we need to know how to schedule the learning rate"
             )
 
-        if cfg.num_steps_per_epoch is None:
+        if num_steps_per_epoch is None:
             return dataloader_num_batches
         else:
-            if dataloader_num_batches < cfg.num_steps_per_epoch:
+            if dataloader_num_batches < num_steps_per_epoch:
                 logger.warning(
-                    f"num_steps_per_epoch ({cfg.num_steps_per_epoch}) is greater than the number "
+                    f"num_steps_per_epoch ({num_steps_per_epoch}) is greater than the number "
                     f"of batches in the dataloader ({dataloader_num_batches}), so we will only "
                     "train for the number of batches in the dataloader"
                 )
                 return dataloader_num_batches
             else:
-                return cfg.num_steps_per_epoch
+                return num_steps_per_epoch
 
     # not using epochs
-    if cfg.num_steps is None:
+    if num_steps is None:
         raise ValueError("num_steps must be provided if not using epochs")
-    if cfg.num_steps_per_epoch is not None:
+    if num_steps_per_epoch is not None:
         raise ValueError("num_steps_per_epoch must not be provided if not using epochs")
-    return cfg.num_steps
+    return num_steps
