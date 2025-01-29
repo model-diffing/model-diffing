@@ -53,7 +53,7 @@ class FakeActivationsDataloader(BaseActivationsDataloader):
             ),
         ),
         BaseTrainConfig(
-            num_steps=100,
+            num_steps_per_epoch=100,
             optimizer=AdamDecayTo0LearningRateConfig(
                 initial_learning_rate=1e-3,
                 last_pct_of_steps=0.2,

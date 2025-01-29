@@ -25,7 +25,7 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
     # If training without epochs (epochs=1), we need to provide num_steps
     # However, if training with epochs, we don't need to limit the number of steps per epoch,
     # just loop through the dataloader
-    epochs_steps: tuple[Literal[1], int] | tuple[int, None]
+    # epochs_steps: tuple[Literal[1], int] | tuple[int, None]
 
     def __init__(
         self,
@@ -41,22 +41,31 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
         self.crosscoder = crosscoder
         self.optimizer = build_optimizer(cfg.optimizer, crosscoder.parameters())
 
-        if cfg.num_steps is not None and cfg.epochs is None:
-            self.epochs_steps = (1, cfg.num_steps)
+        self.epochs = cfg.epochs
 
-            self.lr_scheduler = build_lr_scheduler(cfg.optimizer, cfg.num_steps)
-        elif cfg.num_steps is None and cfg.epochs is not None:
-            self.epochs_steps = (cfg.epochs, None)
+        if self.epochs is None:
+            if cfg.num_steps_per_epoch is None:
+                raise ValueError("num_steps_per_epoch must be provided if epochs is None")
 
+            # num_steps_per_epoch is the total number of steps
+            self.lr_scheduler = build_lr_scheduler(cfg.optimizer, cfg.num_steps_per_epoch)
+        else:
+            # epochs is not None
             dataloader_num_batches = activations_dataloader.num_batches()
             if dataloader_num_batches is None:
                 raise ValueError(
                     "activations_dataloader must have a length if using epochs, "
                     "as we need to know how to schedule the learning rate"
                 )
-            self.lr_scheduler = build_lr_scheduler(cfg.optimizer, dataloader_num_batches * cfg.epochs)
-        else:
-            raise ValueError("(only) one of num_steps and epochs must be provided")
+
+            if cfg.num_steps_per_epoch is None:
+                num_steps_per_epoch = dataloader_num_batches
+            else:
+                num_steps_per_epoch = min(dataloader_num_batches, cfg.num_steps_per_epoch)
+
+            self.num_steps_per_epoch = num_steps_per_epoch
+
+            self.lr_scheduler = build_lr_scheduler(cfg.optimizer, num_steps_per_epoch * self.epochs)
 
         self.activations_dataloader = activations_dataloader
         self.wandb_run = wandb_run
@@ -89,10 +98,10 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
                 config=self.cfg.model_dump(),
             )
 
-        num_epochs, num_steps_per_epoch = self.epochs_steps
-        for _ in range(num_epochs):
+        for _ in range(self.epochs or 1):
             epoch_dataloader = islice(
-                self.activations_dataloader.get_shuffled_activations_iterator_BMLD(), num_steps_per_epoch
+                self.activations_dataloader.get_shuffled_activations_iterator_BMLD(),
+                self.num_steps_per_epoch,
             )
 
             for example_BMLD in epoch_dataloader:

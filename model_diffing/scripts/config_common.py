@@ -36,7 +36,7 @@ class DataConfig(BaseModel):
 class BaseTrainConfig(BaseModel):
     optimizer: AdamDecayTo0LearningRateConfig
     epochs: int | None = None
-    num_steps: int | None = None
+    num_steps_per_epoch: int | None = None
     base_save_dir: str | None = ".checkpoints"
     save_every_n_steps: int | None = None
     log_every_n_steps: int | None = None
@@ -44,7 +44,7 @@ class BaseTrainConfig(BaseModel):
     n_batches_for_norm_estimate: int = 100
 
     def __post_init__(self):
-        if (self.epochs is None) == (self.num_steps is None):
+        if (self.epochs is None) == (self.num_steps_per_epoch is None):
             raise ValueError("(Only) one of epochs or num_steps must be provided")
 
 
