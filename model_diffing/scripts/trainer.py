@@ -97,10 +97,13 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
                 }
 
                 if self.wandb_run:
-                    if (self.step + 1) % self.cfg.log_every_n_steps == 0:
+                    if self.cfg.log_every_n_steps is not None and self.step % self.cfg.log_every_n_steps == 0:
                         self.wandb_run.log(log_dict, step=self.step)
 
-                    if (self.step + 1) % self.cfg.log_visualizations_every_n_steps == 0:
+                    if (
+                        self.cfg.log_visualizations_every_n_steps is not None
+                        and self.step % self.cfg.log_visualizations_every_n_steps == 0
+                    ):
                         visualizations = create_visualizations(
                             self.crosscoder.W_dec_HMLD.detach().cpu(), self.layers_to_harvest
                         )
@@ -111,8 +114,8 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
 
                 if (
                     self.save_dir is not None
-                    and self.cfg.save_every_n_steps
-                    and (self.step + 1) % self.cfg.save_every_n_steps == 0
+                    and self.cfg.save_every_n_steps is not None
+                    and self.step % self.cfg.save_every_n_steps == 0
                 ):
                     save_model_and_config(
                         config=self.cfg,
