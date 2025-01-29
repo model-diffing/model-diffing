@@ -1,6 +1,5 @@
 from abc import abstractmethod
 from itertools import islice
-from typing import Literal
 
 import torch
 import wandb
@@ -43,29 +42,9 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
 
         self.epochs = cfg.epochs
 
-        if self.epochs is None:
-            if cfg.num_steps_per_epoch is None:
-                raise ValueError("num_steps_per_epoch must be provided if epochs is None")
+        self.num_steps_per_epoch = validate_num_steps_per_epoch(cfg, activations_dataloader)
 
-            # num_steps_per_epoch is the total number of steps
-            self.lr_scheduler = build_lr_scheduler(cfg.optimizer, cfg.num_steps_per_epoch)
-        else:
-            # epochs is not None
-            dataloader_num_batches = activations_dataloader.num_batches()
-            if dataloader_num_batches is None:
-                raise ValueError(
-                    "activations_dataloader must have a length if using epochs, "
-                    "as we need to know how to schedule the learning rate"
-                )
-
-            if cfg.num_steps_per_epoch is None:
-                num_steps_per_epoch = dataloader_num_batches
-            else:
-                num_steps_per_epoch = min(dataloader_num_batches, cfg.num_steps_per_epoch)
-
-            self.num_steps_per_epoch = num_steps_per_epoch
-
-            self.lr_scheduler = build_lr_scheduler(cfg.optimizer, num_steps_per_epoch * self.epochs)
+        self.lr_scheduler = build_lr_scheduler(cfg.optimizer, self.num_steps_per_epoch)
 
         self.activations_dataloader = activations_dataloader
         self.wandb_run = wandb_run
@@ -148,3 +127,36 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
 
     @abstractmethod
     def _train_step(self, batch_BMLD: torch.Tensor) -> dict[str, float]: ...
+
+
+def validate_num_steps_per_epoch(cfg: BaseTrainConfig, activations_dataloader: BaseActivationsDataloader) -> int:
+    if cfg.epochs is not None:
+        if cfg.num_steps is not None:
+            raise ValueError("num_steps must not be provided if using epochs")
+
+        dataloader_num_batches = activations_dataloader.num_batches()
+        if dataloader_num_batches is None:
+            raise ValueError(
+                "activations_dataloader must have a length if using epochs, "
+                "as we need to know how to schedule the learning rate"
+            )
+
+        if cfg.num_steps_per_epoch is None:
+            return dataloader_num_batches
+        else:
+            if dataloader_num_batches < cfg.num_steps_per_epoch:
+                logger.warning(
+                    f"num_steps_per_epoch ({cfg.num_steps_per_epoch}) is greater than the number "
+                    f"of batches in the dataloader ({dataloader_num_batches}), so we will only "
+                    "train for the number of batches in the dataloader"
+                )
+                return dataloader_num_batches
+            else:
+                return cfg.num_steps_per_epoch
+
+    # not using epochs
+    if cfg.num_steps is None:
+        raise ValueError("num_steps must be provided if not using epochs")
+    if cfg.num_steps_per_epoch is not None:
+        raise ValueError("num_steps_per_epoch must not be provided if not using epochs")
+    return cfg.num_steps
