@@ -148,7 +148,7 @@ class AcausalCrosscoder(nn.Module):
     def is_folded(self) -> bool:
         return self.folded_scaling_factors_ML is not None
 
-    def fold_activation_scaling_into_weights(self, activation_scaling_factors_ML: t.Tensor) -> None:
+    def fold_activation_scaling_into_weights_(self, activation_scaling_factors_ML: t.Tensor) -> None:
         """scales the crosscoder weights by the activation scaling factors, so that the model can be run on raw llm activations."""
         if self.is_folded:
             raise ValueError("Scaling factors already folded into weights")
@@ -159,7 +159,7 @@ class AcausalCrosscoder(nn.Module):
         # set buffer to prevent double-folding
         self.folded_scaling_factors_ML = activation_scaling_factors_ML
 
-    def unfold_activation_scaling_from_weights(self) -> t.Tensor:
+    def unfold_activation_scaling_from_weights_(self) -> t.Tensor:
         if not self.is_folded:
             raise ValueError("No folded scaling factors found")
 
@@ -188,9 +188,9 @@ class AcausalCrosscoder(nn.Module):
     @contextmanager
     def temporary_fold(self, scaling_factors: t.Tensor):
         """Temporarily fold scaling factors into weights."""
-        self.fold_activation_scaling_into_weights(scaling_factors)
+        self.fold_activation_scaling_into_weights_(scaling_factors)
         yield
-        _ = self.unfold_activation_scaling_from_weights()
+        _ = self.unfold_activation_scaling_from_weights_()
 
 
 def build_relu_crosscoder(
