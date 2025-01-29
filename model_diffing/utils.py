@@ -25,7 +25,7 @@ def build_wandb_run(wandb_config: WandbConfig, config: BaseModel) -> Run | None:
 
 
 def save_model_and_config(config: BaseModel, save_dir: Path, model: nn.Module, epoch: int) -> None:
-    """Save the model to disk. Also save the config file if it doesn't exist.
+    """Save the model to disk. Also save the config file.
 
     Args:
         config: The config object. Saved if save_dir / "config.yaml" doesn't already exist.
@@ -35,7 +35,7 @@ def save_model_and_config(config: BaseModel, save_dir: Path, model: nn.Module, e
     """
     save_dir.mkdir(parents=True, exist_ok=True)
     with open(save_dir / "config.yaml", "w") as f:
-        yaml.dump(config, f)
+        yaml.dump(config.model_dump(), f)
     logger.info("Saved config to %s", save_dir / "config.yaml")
 
     model_file = save_dir / f"model_epoch_{epoch + 1}.pt"

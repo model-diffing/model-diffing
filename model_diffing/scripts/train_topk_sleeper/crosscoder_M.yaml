@@ -20,7 +20,8 @@ wandb:
 crosscoder:
   hidden_dim: 1536
   k: 20
-  ft_init_checkpt: "./.checkpoints/crosscoder_S/model_epoch_20.pt"
+  ft_init_checkpt_folder: "./.checkpoints/crosscoder_S"
+  ft_init_checkpt_epoch: 20
 train:
   optimizer:
     initial_learning_rate: 2.5e-5

@@ -8,7 +8,7 @@ from model_diffing.dataloader.data import build_dataloader_BMLD, dataset_total_s
 from model_diffing.log import logger
 from model_diffing.models.crosscoder import build_topk_crosscoder
 from model_diffing.scripts.llms import build_llm_lora
-from model_diffing.scripts.train_topk_sleeper.config import TopKExperimentConfig
+from model_diffing.scripts.train_topk_sleeper.config import TopKExperimentConfig, TrainConfig
 from model_diffing.scripts.train_topk_sleeper.trainer import TopKTrainer
 from model_diffing.utils import build_wandb_run, get_device
 
@@ -42,11 +42,13 @@ def build_trainer(cfg: TopKExperimentConfig) -> TopKTrainer:
     crosscoder = crosscoder.to(device)
 
     # Load checkpoint if provided
-    if cfg.crosscoder.ft_init_checkpt is not None:
-        checkpoint_path = cfg.crosscoder.ft_init_checkpt
+    if cfg.crosscoder.ft_init_checkpt_folder is not None:
+        checkpoint_path = cfg.crosscoder.ft_init_checkpt_folder / f"model_epoch_{cfg.crosscoder.ft_init_checkpt_epoch}.pt"
         print(f"Loading checkpoint from {checkpoint_path}")
         state_dict = torch.load(checkpoint_path)
         crosscoder.load_state_dict(state_dict)
+        old_cfg = TrainConfig(**yaml.safe_load(open(cfg.crosscoder.ft_init_checkpt_folder / "config.yaml")))
+        cfg.train.norm_scaling_factors = old_cfg.norm_scaling_factors
 
     wandb_run = build_wandb_run(cfg.wandb, cfg) if cfg.wandb != "disabled" else None
 

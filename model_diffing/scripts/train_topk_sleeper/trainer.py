@@ -1,4 +1,5 @@
 from collections.abc import Callable, Iterator
+from pathlib import Path
 
 from itertools import islice
 import numpy as np
@@ -48,12 +49,12 @@ class TopKTrainer:
 
         self.lr_scheduler = build_lr_scheduler(cfg.optimizer, self.total_steps)
 
-    def _run_validation(self, norm_scaling_factors_ML: torch.Tensor):
+    def _run_validation(self):
         test_logs = []
         for batch_BMLD in islice(self.validation_dataloader_builder(), self.cfg.num_test_batches):
             batch_BMLD = batch_BMLD.to(self.device)
             batch_BMLD = einsum(
-                batch_BMLD, norm_scaling_factors_ML,
+                batch_BMLD, torch.tensor(self.cfg.norm_scaling_factors, device=self.device),
                 "batch model layer d_model, model layer -> batch model layer d_model"
             )
             test_logs.append(self._test_step(batch_BMLD))
@@ -63,11 +64,11 @@ class TopKTrainer:
             self.wandb_run.log(test_log, step=self.step)
         logger.info(test_log)
 
-    def _run_epoch(self, epoch: int, norm_scaling_factors_ML: torch.Tensor):
+    def _run_epoch(self, epoch: int):
         for batch_BMLD in self.dataloader_builder():
             batch_BMLD = batch_BMLD.to(self.device)
             batch_BMLD = einsum(
-                batch_BMLD, norm_scaling_factors_ML,
+                batch_BMLD, torch.tensor(self.cfg.norm_scaling_factors, device=self.device),
                 "batch model layer d_model, model layer -> batch model layer d_model"
             )
 
@@ -79,15 +80,17 @@ class TopKTrainer:
             self.step += 1
 
     def train(self):
-        logger.info("Estimating norm scaling factors (model, layer)")
+        if self.cfg.norm_scaling_factors is None:
+            logger.info("Estimating norm scaling factors (model, layer)")
+            norm_scaling_factors_ML = estimate_norm_scaling_factor_ML(
+                self.dataloader_builder(),
+                self.device,
+                self.cfg.n_batches_for_norm_estimate,
+            )
+            self.cfg.norm_scaling_factors = norm_scaling_factors_ML.tolist()
 
-        norm_scaling_factors_ML = estimate_norm_scaling_factor_ML(
-            self.dataloader_builder(),
-            self.device,
-            self.cfg.n_batches_for_norm_estimate,
-        )
+        logger.info(f"Norm scaling factors (model, layer): {self.cfg.norm_scaling_factors}")
 
-        logger.info(f"Norm scaling factors (model, layer): {norm_scaling_factors_ML}")
 
         if self.wandb_run:
             wandb.init(
@@ -97,10 +100,10 @@ class TopKTrainer:
             )
 
         # Run initial validation
-        self._run_validation(norm_scaling_factors_ML)
+        self._run_validation()
 
         for epoch in range(self.cfg.num_epochs):
-            self._run_epoch(epoch, norm_scaling_factors_ML)
+            self._run_epoch(epoch)
         
             if self.cfg.save_dir and self.cfg.save_every_n_epochs and (epoch + 1) % self.cfg.save_every_n_epochs == 0:
                 save_model_and_config(
@@ -110,7 +113,7 @@ class TopKTrainer:
                     epoch=epoch,
                 )
 
-            self._run_validation(norm_scaling_factors_ML)
+            self._run_validation()
 
     def _get_loss(self, batch_BMLD: torch.Tensor) -> tuple[torch.Tensor, np.ndarray[Any, np.dtype[np.float64]]]:
         train_res = self.crosscoder.forward_train(batch_BMLD)
