@@ -26,6 +26,7 @@ def test_return_shapes():
     assert train_res.reconstructed_acts_BMLD.shape == activations_BMLD.shape
     assert train_res.hidden_BH.shape == (batch_size, cc_hidden_dim)
 
+
 def test_batch_topk_activation():
     batch_topk_activation = BatchTopkActivation(k_per_example=2)
     hidden_preactivation_BH = t.tensor([[1, 2, 3, 4, 10], [1, 2, 11, 12, 13]])
