@@ -11,7 +11,7 @@ from torch import nn
 from wandb.sdk.wandb_run import Run
 
 from model_diffing.log import logger
-from model_diffing.scripts.config_common import BaseExperimentConfig
+from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainConfig
 
 
 def build_wandb_run(config: BaseExperimentConfig) -> Run | None:
@@ -23,7 +23,7 @@ def build_wandb_run(config: BaseExperimentConfig) -> Run | None:
     )
 
 
-def save_model_and_config(config: BaseExperimentConfig, save_dir: Path, model: nn.Module, epoch: int) -> None:
+def save_model_and_config(config: BaseTrainConfig, save_dir: Path, model: nn.Module, epoch: int) -> None:
     """Save the model to disk. Also save the config file if it doesn't exist.
 
     Args:
