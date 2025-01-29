@@ -37,7 +37,7 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
         self.tokens_trained = 0
 
     def train(self):
-        logger.info("Estimating norm scaling factors (model, layer)")
+        logger.info("Estimating norm scaling factors")
 
         norm_scaling_factors_ML = estimate_norm_scaling_factor_ML(
             self.dataloader_BMLD,
@@ -45,7 +45,7 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
             self.cfg.n_batches_for_norm_estimate,
         )
 
-        logger.info(f"Norm scaling factors (model, layer): {norm_scaling_factors_ML}")
+        logger.info(f"Norm scaling factors: {norm_scaling_factors_ML}")
 
         if self.wandb_run:
             wandb.init(

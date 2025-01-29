@@ -6,6 +6,8 @@ import torch
 from datasets import load_dataset
 from transformers import PreTrainedTokenizerBase
 
+from model_diffing.log import logger
+
 
 class TokenSequenceLoader(ABC):
     @abstractmethod
@@ -26,11 +28,15 @@ class CommonCorpusTokenSequenceIterator(TokenSequenceLoader):
         self._sequence_length = sequence_length
 
     def get_sequence_iterator(self) -> Iterator[torch.Tensor]:
-        text_dataset = load_dataset(
+        dataset_iter = iter(load_dataset(
             self.COMMON_CORPUS_HF_DATASET, streaming=True, cache_dir=self._cache_dir, split="train"
-        )
+        ))
 
-        for example in text_dataset:
+        demo_example = next(dataset_iter)
+        logger.info(f"demo_example length: {len(demo_example['text'])}")
+        logger.info(f"{len(demo_example['text']) / self._sequence_length:.2f} sequences per example")
+
+        for example in dataset_iter:
             example = cast(dict[str, Any], example)
             tokeniser_result = self._tokenizer(example["text"])
             seq_tokens_S = torch.tensor(tokeniser_result["input_ids"])
@@ -88,6 +94,9 @@ class ConnorGemma2TokenSequenceLoader(TokenSequenceLoader):
 
 # from itertools import islice
 
+# Load specific subset of shards
+
+
 # class ThePileTokenSequenceIterator(TokenSequenceLoader):
 #     HF_TOKENISED_DATASET = "EleutherAI/pile"
 
@@ -102,6 +111,67 @@ class ConnorGemma2TokenSequenceLoader(TokenSequenceLoader):
 
 
 # if __name__ == "__main__":
-#     token_loader = ThePileTokenSequenceIterator("~/data/hf_cache")
-#     for tokens in islice(token_loader.get_sequence_iterator(), 10):
-#         print(tokens.shape)
+#     import itertools
+#     import math
+#     import os
+#     from pathlib import Path
+
+#     from datasets import load_dataset
+
+#     # Configuration
+#     TARGET_SIZE_GB = 20
+#     OUTPUT_DIR = Path("pile_subset_data")
+
+#     # Create output directory
+#     os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+#     # First, load a small sample to estimate size per example
+#     print("Estimating dataset size...")
+#     sample_dataset = load_dataset(
+#         "EleutherAI/pile",
+#         split="train",
+#         streaming=True,
+#     )
+
+#     # Sample 1000 examples to estimate average size
+#     sample_size = 1000
+#     total_bytes = 0
+#     samples = []
+
+#     for example in itertools.islice(sample_dataset, sample_size):
+#         example = cast(dict[str, Any], example)
+#         total_bytes += len(example.get("text", "").encode("utf-8"))
+#         samples.append(example)
+
+#     avg_bytes_per_example = total_bytes / sample_size
+#     target_size_bytes = TARGET_SIZE_GB * 1024 * 1024 * 1024
+#     estimated_examples_needed = math.ceil(target_size_bytes / avg_bytes_per_example)
+
+#     print(f"Average example size: {avg_bytes_per_example / 1024 / 1024:.2f}MB")
+#     print(f"Estimated examples needed for {TARGET_SIZE_GB}GB: {estimated_examples_needed:,}")
+
+#     # Now load the actual subset using datasets' built-in functionality
+#     print("\nDownloading dataset subset...")
+#     dataset = load_dataset(
+#         "EleutherAI/pile",
+#         split=f"train[:{estimated_examples_needed}]",
+#         cache_dir=str(OUTPUT_DIR),
+#     )
+
+#     if isinstance(dataset, Dataset):
+#         print(f"\nSaving dataset to {OUTPUT_DIR}...")
+#         dataset.save_to_disk(OUTPUT_DIR)
+
+#         # Verify final size
+#         total_size = sum(
+#             os.path.getsize(os.path.join(dirpath, filename))
+#             for dirpath, _, filenames in os.walk(OUTPUT_DIR)
+#             for filename in filenames
+#         )
+
+#         print("\nDownload complete!")
+#         print(f"Final size on disk: {total_size / 1024 / 1024 / 1024:.2f}GB")
+#         print(f"Number of examples: {len(dataset):,}")
+#         print(f"Data saved in: {OUTPUT_DIR.absolute()}")
+#     else:
+#         print("Error: Dataset was not loaded as expected. Please try a different approach.")

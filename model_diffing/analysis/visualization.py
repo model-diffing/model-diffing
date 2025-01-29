@@ -18,12 +18,15 @@ def create_visualizations(W_dec_HMLD: torch.Tensor, layers: list[int]) -> dict[s
         a_HD = W_dec_HMLD[:, 0, layer_idx]
         b_HD = W_dec_HMLD[:, 1, layer_idx]
 
-        relative_norms_fig = plot_relative_norms(a_HD, b_HD, title=f"Relative Norms. Layer {layer_name}")
-        plots[f"relative_decoder_norms_layer_{layer_name}"] = relative_norms_fig
+        relative_norms_H = metrics.compute_relative_norms_N(a_HD, b_HD)
+        norms_hist_fig: go.Figure = relative_norms_hist(relative_norms_H, title=f"Relative Norms. Layer {layer_name}")
+        plots[f"relative_decoder_norms_hist_layer_{layer_name}"] = norms_hist_fig
 
-        cosine_sim_fig = plot_cosine_sim(
-            metrics.compute_cosine_similarities_N(a_HD, b_HD), title=f"Cosine Similarity. Layer {layer_name}"
-        )
+        shared_latent_mask = metrics.get_shared_latent_mask(relative_norms_H)
+        cosine_sims_H = metrics.compute_cosine_similarities_N(a_HD, b_HD)
+        shared_features_cosine_sims_H = cosine_sims_H[shared_latent_mask]
+
+        cosine_sim_fig = plot_cosine_sim(shared_features_cosine_sims_H, title=f"Cosine Similarity. Layer {layer_name}")
         plots[f"cosine_sim_layer_{layer_name}"] = cosine_sim_fig
 
     return plots
