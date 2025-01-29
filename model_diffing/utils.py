@@ -38,7 +38,7 @@ def save_model_and_config(config: BaseExperimentConfig, save_dir: Path, model: n
             yaml.dump(config, f)
         logger.info("Saved config to %s", save_dir / "config.yaml")
 
-    model_file = save_dir / f"model_epoch_{epoch + 1}.pt"
+    model_file = save_dir / f"model_epoch_{epoch}.pt"
     torch.save(model.state_dict(), model_file)
     logger.info("Saved model to %s", model_file)
 

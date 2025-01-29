@@ -1,5 +1,6 @@
 from abc import abstractmethod
 from itertools import islice
+from pathlib import Path
 
 import torch
 import wandb
@@ -53,7 +54,7 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
         self.device = device
         self.layers_to_harvest = layers_to_harvest
 
-        self.save_dir = f"{cfg.base_save_dir}/{experiment_name}" if cfg.base_save_dir is not None else None
+        self.save_dir = Path(cfg.base_save_dir) / experiment_name if cfg.base_save_dir is not None else None
 
         self.step = 0
         self.epoch = 0
