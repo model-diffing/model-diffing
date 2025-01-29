@@ -28,9 +28,9 @@ class CommonCorpusTokenSequenceIterator(TokenSequenceLoader):
         self._sequence_length = sequence_length
 
     def get_sequence_iterator(self) -> Iterator[torch.Tensor]:
-        dataset_iter = iter(load_dataset(
-            self.COMMON_CORPUS_HF_DATASET, streaming=True, cache_dir=self._cache_dir, split="train"
-        ))
+        dataset_iter = iter(
+            load_dataset(self.COMMON_CORPUS_HF_DATASET, streaming=True, cache_dir=self._cache_dir, split="train")
+        )
 
         demo_example = next(dataset_iter)
         logger.info(f"demo_example length: {len(demo_example['text'])}")

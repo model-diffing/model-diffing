@@ -2,7 +2,6 @@ from typing import Any
 
 import einops
 import numpy as np
-import plotly.express as px
 
 
 def random_2d(elements: int):
