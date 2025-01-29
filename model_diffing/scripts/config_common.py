@@ -65,7 +65,7 @@ class BaseExperimentConfig(BaseModel):
     cache_dir: str = ".cache"
     data: DataConfig
     wandb: bool = False
-    name: str
+    experiment_name: str
 
 
 __DEMO = BaseExperimentConfig(
@@ -90,5 +90,5 @@ __DEMO = BaseExperimentConfig(
         cc_training_batch_size=16,
     ),
     wandb=False,
-    name="demo",
+    experiment_name="demo",
 )

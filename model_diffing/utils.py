@@ -16,7 +16,7 @@ from model_diffing.scripts.config_common import BaseExperimentConfig
 
 def build_wandb_run(config: BaseExperimentConfig) -> Run | None:
     return wandb.init(
-        name=config.name,
+        name=config.experiment_name,
         project="model-diffing",
         entity="mars-model-diffing",
         config=config.model_dump(),

@@ -36,7 +36,7 @@ def build_l1_crosscoder_trainer(cfg: L1ExperimentConfig) -> L1CrosscoderTrainer:
         wandb_run=wandb_run,
         device=device,
         layers_to_harvest=cfg.data.activations_harvester.layer_indices_to_harvest,
-        experiment_name=cfg.name,
+        experiment_name=cfg.experiment_name,
     )
 
 
