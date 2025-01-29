@@ -1,4 +1,6 @@
 # %%
+from typing import cast
+
 import plotly.express as px  # type: ignore
 import torch
 
@@ -72,7 +74,7 @@ fig.show()
 # %%
 fig_list = visualization.plot_norms_hists(
     norms_NML,
-    model_names=[model.name for model in llms],
+    model_names=cast(list[str], [model.name for model in llms]),
     layer_names=data_config.activations_harvester.layer_indices_to_harvest,
     k_iqr=3.0,
     overlay=False,
@@ -86,7 +88,7 @@ fig.show()
 # %%
 fig_list = visualization.plot_norms_hists(
     norms_NML,
-    model_names=[model.name for model in llms],
+    model_names=cast(list[str], [model.name for model in llms]),
     layer_names=data_config.activations_harvester.layer_indices_to_harvest,
     k_iqr=3.0,
     overlay=True,
