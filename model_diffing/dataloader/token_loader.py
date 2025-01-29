@@ -109,7 +109,7 @@ class ConnorGemma2TokenSequenceLoader(TokenSequenceLoader):
             split="train", 
             batch_size=self._batch_size,
         )
-        sequence_iterator = (tokens_S["input_ids"] for tokens_S in cast(Iterator[dict[str, Any]], dataset))
+        sequence_iterator = (torch.tensor(tokens_S["input_ids"]) for tokens_S in cast(Iterator[dict[str, Any]], dataset))
         return self._batch_accumulator(sequence_iterator)
 
     def num_batches(self) -> int | None:
@@ -144,7 +144,9 @@ class ConnorGemma2TokenSequenceLoader(TokenSequenceLoader):
 #             yield tokens
 
 
-# if __name__ == "__main__":
-#     token_loader = ThePileTokenSequenceIterator("~/data/hf_cache")
-#     for tokens in islice(token_loader.get_sequence_iterator(), 10):
-#         print(tokens.shape)
+if __name__ == "__main__":
+    from itertools import islice
+    token_loader = ConnorGemma2TokenSequenceLoader(cache_dir=".cache", batch_size=16)
+    for tokens in islice(token_loader.get_sequences_batch_iterator(), 10):
+        print(tokens.shape)
+
