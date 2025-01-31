@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
+from threading import local
 from typing import Any, cast
 
 import torch as t
@@ -82,7 +83,110 @@ ACTIVATIONS = {
 }
 
 
-# class JumpReluActivation(nn.Module):
+def rectangle(x: t.Tensor) -> t.Tensor:
+    """
+    when:
+        x < -0.5 -> 0
+        -0.5 < x < 0.5 -> 1
+        x > 0.5 -> 0
+    """
+    return ((x > -0.5) & (x < 0.5)).to(x)
+
+
+class Step(t.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx: Any,
+        input_BX: t.Tensor,
+        log_threshold_X: t.Tensor,
+        bandwidth: float,
+    ) -> t.Tensor:
+        """
+        threshold_X is $\\theta$ in the GDM paper, $t$ in the Anthropic paper.
+
+        Where GDM don't backprop through the threshold in "jumping ahead", Anthropic do in the jan 2025 update.
+        """
+        threshold_X = log_threshold_X.exp()
+
+        ctx.save_for_backward(input_BX, threshold_X)
+        ctx.bandwidth = bandwidth
+
+        return (input_BX > threshold_X).to(input_BX)
+
+    @staticmethod
+    def backward(ctx: Any, grad_output_BX: t.Tensor) -> tuple[t.Tensor | None, t.Tensor, None]:  # type: ignore
+        input_BX, threshold_X = cast(tuple[t.Tensor, ...], ctx.saved_tensors)
+        bandwidth = ctx.bandwidth
+
+        grad_threshold_BX = (
+            -(1 / bandwidth)  #
+            * rectangle((input_BX - threshold_X) / bandwidth)
+            * grad_output_BX
+        )
+
+        grad_threshold_X = grad_threshold_BX.sum(0)
+
+        return (
+            None,  # input_BX
+            grad_threshold_X,
+            None,  # bandwidth
+        )
+
+
+class JumpReLU(nn.Module):
+    def __init__(
+        self,
+        size: int,
+        bandwidth: float,
+    ):
+        self._log_threshold_X = nn.Parameter(t.ones(size) * 0.1)
+        self._bandwidth = bandwidth
+
+    def forward(self, x_BX: t.Tensor) -> t.Tensor:
+        return JumpReLUActivation.apply(x_BX, self._log_threshold_X, self._bandwidth)  # type: ignore
+
+
+class JumpReLUActivation(t.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx: Any,
+        input_BX: t.Tensor,
+        log_threshold_X: t.Tensor,
+        bandwidth: float,
+        backprop_through_input: bool = False,
+    ) -> t.Tensor:
+        """
+        threshold_X is $\\theta$ in the GDM paper, $t$ in the Anthropic paper.
+
+        Where GDM don't backprop through the threshold in "jumping ahead", Anthropic do in the jan 2025 update.
+        """
+        threshold_X = log_threshold_X.exp()
+        input_mask_BX = input_BX > threshold_X
+        ctx.save_for_backward(input_BX, input_mask_BX, threshold_X, t.tensor(bandwidth))
+        ctx.backprop_through_input = backprop_through_input
+        return input_mask_BX * input_BX
+
+    @staticmethod
+    def backward(ctx: Any, grad_output_BX: t.Tensor) -> tuple[t.Tensor | None, t.Tensor, None]:  # type: ignore
+        input_BX, input_mask_BX, threshold_X, bandwidth = ctx.saved_tensors
+
+        grad_threshold_BX = (
+            threshold_X  #
+            * -(1 / bandwidth)
+            * rectangle((input_BX - threshold_X) / bandwidth)
+            * grad_output_BX
+        )
+
+        grad_threshold_X = grad_threshold_BX.sum(0)  # this is technically unnecessary as torch will automatically do it
+
+        if ctx.backprop_through_input:
+            return input_mask_BX * grad_output_BX, grad_threshold_X, None
+
+        return (
+            None,  # input_BX
+            grad_threshold_X,
+            None,  # bandwidth
+        )
 
 
 class AcausalCrosscoder(SaveableModule):
