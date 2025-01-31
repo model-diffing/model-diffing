@@ -93,46 +93,6 @@ def rectangle(x: t.Tensor) -> t.Tensor:
     return ((x > -0.5) & (x < 0.5)).to(x)
 
 
-class Step(t.autograd.Function):
-    @staticmethod
-    def forward(
-        ctx: Any,
-        input_BX: t.Tensor,
-        log_threshold_X: t.Tensor,
-        bandwidth: float,
-    ) -> t.Tensor:
-        """
-        threshold_X is $\\theta$ in the GDM paper, $t$ in the Anthropic paper.
-
-        Where GDM don't backprop through the threshold in "jumping ahead", Anthropic do in the jan 2025 update.
-        """
-        threshold_X = log_threshold_X.exp()
-
-        ctx.save_for_backward(input_BX, threshold_X)
-        ctx.bandwidth = bandwidth
-
-        return (input_BX > threshold_X).to(input_BX)
-
-    @staticmethod
-    def backward(ctx: Any, grad_output_BX: t.Tensor) -> tuple[t.Tensor | None, t.Tensor, None]:  # type: ignore
-        input_BX, threshold_X = cast(tuple[t.Tensor, ...], ctx.saved_tensors)
-        bandwidth = ctx.bandwidth
-
-        grad_threshold_BX = (
-            -(1 / bandwidth)  #
-            * rectangle((input_BX - threshold_X) / bandwidth)
-            * grad_output_BX
-        )
-
-        grad_threshold_X = grad_threshold_BX.sum(0)
-
-        return (
-            None,  # input_BX
-            grad_threshold_X,
-            None,  # bandwidth
-        )
-
-
 class JumpReLUActivation(SaveableModule):
     def __init__(
         self,
