@@ -22,7 +22,6 @@ def build_jan_update_crosscoder_trainer(cfg: JanUpdateExperimentConfig) -> JanUp
         n_layers=n_layers,
         d_model=d_model,
         cc_hidden_dim=cfg.crosscoder.hidden_dim,
-        dec_init_norm=cfg.crosscoder.dec_init_norm,
         bandwidth=cfg.crosscoder.bandwidth,
         threshold_init=cfg.crosscoder.threshold_init,
         data_loader=dataloader,

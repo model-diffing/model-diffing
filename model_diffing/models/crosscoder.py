@@ -417,7 +417,6 @@ def build_jan_update_crosscoder(
     n_layers: int,
     d_model: int,
     cc_hidden_dim: int,
-    dec_init_norm: float,
     bandwidth: float,
     threshold_init: float,
     data_loader: BaseActivationsDataloader,  # We assume this provides batches of shape (batch, n_models, n_layers, d_model)
@@ -436,7 +435,7 @@ def build_jan_update_crosscoder(
         n_layers=n_layers,
         d_model=d_model,
         hidden_dim=cc_hidden_dim,
-        dec_init_norm=dec_init_norm,
+        dec_init_norm=0,  # dec_init_norm doesn't matter here as we override weights below
         hidden_activation=JumpReLUActivation(
             size=cc_hidden_dim,
             bandwidth=bandwidth,

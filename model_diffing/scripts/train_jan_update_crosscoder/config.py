@@ -5,7 +5,6 @@ from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainC
 
 class JanUpdateCrosscoderConfig(BaseModel):
     hidden_dim: int
-    dec_init_norm: float = 0.1
     bandwidth: float = 2.0  # aka ε
     threshold_init: float = 0.1  # aka t
 
