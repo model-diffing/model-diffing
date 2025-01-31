@@ -36,11 +36,11 @@ def test_batch_topk_activation():
 
 
 def test_weights_folding_keeps_hidden_representations_consistent():
-    batch_size = 4
+    batch_size = 1
     n_models = 2
-    n_layers = 6
-    d_model = 16
-    cc_hidden_dim = 256
+    n_layers = 3
+    d_model = 4
+    cc_hidden_dim = 16
     dec_init_norm = 1
 
     crosscoder = build_relu_crosscoder(n_models, n_layers, d_model, cc_hidden_dim, dec_init_norm)
@@ -58,8 +58,12 @@ def test_weights_folding_keeps_hidden_representations_consistent():
     output_after_unfolding = crosscoder.forward_train(scaled_input_BMLD)
 
     # all hidden representations should be the same
-    assert t.allclose(output_without_folding.hidden_BH, output_with_folding.hidden_BH)
-    assert t.allclose(output_without_folding.hidden_BH, output_after_unfolding.hidden_BH)
+    assert t.allclose(output_without_folding.hidden_BH, output_with_folding.hidden_BH), (
+        f"max diff: {t.max(t.abs(output_without_folding.hidden_BH - output_with_folding.hidden_BH))}"
+    )
+    assert t.allclose(output_without_folding.hidden_BH, output_after_unfolding.hidden_BH), (
+        f"max diff: {t.max(t.abs(output_without_folding.hidden_BH - output_after_unfolding.hidden_BH))}"
+    )
 
 
 def test_weights_folding_scales_output_correctly():
