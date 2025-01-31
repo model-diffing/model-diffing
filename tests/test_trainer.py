@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 import torch
@@ -11,7 +12,7 @@ from model_diffing.scripts.trainer import BaseTrainer, validate_num_steps_per_ep
 from model_diffing.utils import get_device
 
 
-class TestTrainer(BaseTrainer[BaseTrainConfig]):
+class TestTrainer(BaseTrainer[BaseTrainConfig, Any]):
     __test__ = False
 
     def _train_step(self, batch_BMLD: Tensor) -> dict[str, float]:

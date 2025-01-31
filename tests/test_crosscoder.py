@@ -87,3 +87,51 @@ def test_weights_folding_scales_output_correctly():
     assert t.allclose(scaled_output_BMLD, scaled_output_folded_BMLD), (
         f"max diff: {t.max(t.abs(scaled_output_BMLD - scaled_output_folded_BMLD))}"
     )
+
+
+def test_weights_rescaling():
+    batch_size = 1
+    n_models = 2
+    n_layers = 3
+    d_model = 4
+    cc_hidden_dim = 32
+    dec_init_norm = 0.1
+
+    crosscoder = build_relu_crosscoder(n_models, n_layers, d_model, cc_hidden_dim, dec_init_norm)
+
+    activations_BMLD = t.randn(batch_size, n_models, n_layers, d_model)
+    output_BMLD = crosscoder.forward_train(activations_BMLD)
+
+    new_cc = crosscoder.with_decoder_unit_norm()
+    output_rescaled_BMLD = new_cc.forward_train(activations_BMLD)
+
+    assert t.allclose(output_BMLD.reconstructed_acts_BMLD, output_rescaled_BMLD.reconstructed_acts_BMLD), (
+        f"max diff: {t.max(t.abs(output_BMLD.reconstructed_acts_BMLD - output_rescaled_BMLD.reconstructed_acts_BMLD))}"
+    )
+
+    new_cc_dec_norms = new_cc.W_dec_HMLD.norm(p=2, dim=(1, 2, 3))
+    assert t.allclose(new_cc_dec_norms, t.ones_like(new_cc_dec_norms))
+
+
+def test_weights_rescaling_makes_unit_norm_decoder_output():
+    batch_size = 1
+    n_models = 2
+    n_layers = 3
+    d_model = 4
+    cc_hidden_dim = 32
+    dec_init_norm = 0.1
+
+    crosscoder = build_relu_crosscoder(n_models, n_layers, d_model, cc_hidden_dim, dec_init_norm)
+
+    activations_BMLD = t.randn(batch_size, n_models, n_layers, d_model)
+    output_BMLD = crosscoder.forward_train(activations_BMLD)
+
+    new_cc = crosscoder.with_decoder_unit_norm()
+    output_rescaled_BMLD = new_cc.forward_train(activations_BMLD)
+
+    assert t.allclose(output_BMLD.reconstructed_acts_BMLD, output_rescaled_BMLD.reconstructed_acts_BMLD), (
+        f"max diff: {t.max(t.abs(output_BMLD.reconstructed_acts_BMLD - output_rescaled_BMLD.reconstructed_acts_BMLD))}"
+    )
+
+    new_cc_dec_norms = new_cc.W_dec_HMLD.norm(p=2, dim=(1, 2, 3))
+    assert t.allclose(new_cc_dec_norms, t.ones_like(new_cc_dec_norms))

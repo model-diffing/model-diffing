@@ -14,11 +14,11 @@ from model_diffing.log import logger
 from model_diffing.models.crosscoder import AcausalCrosscoder
 from model_diffing.scripts.config_common import BaseTrainConfig
 from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer, estimate_norm_scaling_factor_ML
-from model_diffing.utils import CONFIG_FILE_NAME, MODEL_FILE_NAME, save_model_and_config
+from model_diffing.utils import CONFIG_FILE_NAME, MODEL_FILE_NAME, SaveableModule, save_model_and_config
 
 
-class BaseTrainer[TConfig: BaseTrainConfig]:
-    step: int
+class BaseTrainer[TConfig: BaseTrainConfig, TAct: SaveableModule]:
+    tep: int
     epoch: int
     unique_tokens_trained: int
 
@@ -32,7 +32,7 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
         self,
         cfg: TConfig,
         activations_dataloader: BaseActivationsDataloader,
-        crosscoder: AcausalCrosscoder,
+        crosscoder: AcausalCrosscoder[TAct],
         wandb_run: Run | None,
         device: torch.device,
         layers_to_harvest: list[int],
@@ -47,6 +47,8 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
         self.num_steps_per_epoch = validate_num_steps_per_epoch(
             cfg.epochs, cfg.num_steps_per_epoch, cfg.num_steps, activations_dataloader
         )
+
+        self.total_steps = self.num_steps_per_epoch * (cfg.epochs or 1)
 
         self.lr_scheduler = build_lr_scheduler(cfg.optimizer, self.num_steps_per_epoch)
 

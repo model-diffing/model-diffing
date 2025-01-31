@@ -1,12 +1,12 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
-from threading import local
 from typing import Any, cast
 
 import torch as t
 from einops import einsum, rearrange, reduce
 from torch import nn
 
+from model_diffing.dataloader.activations import BaseActivationsDataloader
 from model_diffing.utils import SaveableModule, l2_norm
 
 """
@@ -133,20 +133,29 @@ class Step(t.autograd.Function):
         )
 
 
-class JumpReLU(nn.Module):
+class JumpReLUActivation(SaveableModule):
     def __init__(
         self,
         size: int,
         bandwidth: float,
+        threshold_init: float,
     ):
-        self._log_threshold_X = nn.Parameter(t.ones(size) * 0.1)
-        self._bandwidth = bandwidth
+        super().__init__()
+        self.log_threshold_H = nn.Parameter(t.ones(size) * threshold_init)
+        self.bandwidth = bandwidth
 
     def forward(self, x_BX: t.Tensor) -> t.Tensor:
-        return JumpReLUActivation.apply(x_BX, self._log_threshold_X, self._bandwidth)  # type: ignore
+        return JumpReLU.apply(x_BX, self.log_threshold_H, self.bandwidth)  # type: ignore
+
+    def dump_cfg(self) -> dict[str, int | float | str]:
+        return {"size": self.log_threshold_H.shape[0], "bandwidth": self.bandwidth}
+
+    @classmethod
+    def from_cfg(cls, cfg: dict[str, Any]) -> "JumpReLUActivation":
+        return cls(**cfg)
 
 
-class JumpReLUActivation(t.autograd.Function):
+class JumpReLU(t.autograd.Function):
     @staticmethod
     def forward(
         ctx: Any,
@@ -180,7 +189,11 @@ class JumpReLUActivation(t.autograd.Function):
         grad_threshold_X = grad_threshold_BX.sum(0)  # this is technically unnecessary as torch will automatically do it
 
         if ctx.backprop_through_input:
-            return input_mask_BX * grad_output_BX, grad_threshold_X, None
+            return (
+                input_mask_BX * grad_output_BX,  # input_BX
+                grad_threshold_X,
+                None,  # bandwidth
+            )
 
         return (
             None,  # input_BX
@@ -189,7 +202,7 @@ class JumpReLUActivation(t.autograd.Function):
         )
 
 
-class AcausalCrosscoder(SaveableModule):
+class AcausalCrosscoder[TActivation: SaveableModule](SaveableModule):
     """crosscoder that autoencodes activations of a subset of a model's layers"""
 
     folded_scaling_factors_ML: t.Tensor | None
@@ -202,7 +215,7 @@ class AcausalCrosscoder(SaveableModule):
         d_model: int,
         hidden_dim: int,
         dec_init_norm: float,
-        hidden_activation: SaveableModule,
+        hidden_activation: TActivation,
     ):
         super().__init__()
         self.n_models = n_models
@@ -211,7 +224,9 @@ class AcausalCrosscoder(SaveableModule):
         self.hidden_dim = hidden_dim
         self.hidden_activation = hidden_activation
 
-        self.W_dec_HMLD = nn.Parameter(t.randn((hidden_dim, n_models, n_layers, d_model)))
+        W_base_HMLD = t.randn((hidden_dim, n_models, n_layers, d_model))
+
+        self.W_dec_HMLD = nn.Parameter(W_base_HMLD.clone())
 
         with t.no_grad():
             W_dec_norm_MLD1 = reduce(self.W_dec_HMLD, "hidden model layer d_model -> hidden model layer 1", l2_norm)
@@ -220,7 +235,7 @@ class AcausalCrosscoder(SaveableModule):
 
             self.W_enc_MLDH = nn.Parameter(
                 rearrange(  # "transpose" of the encoder weights
-                    self.W_dec_HMLD.clone(),
+                    W_base_HMLD,
                     "hidden model layer d_model -> model layer d_model hidden",
                 )
             )
@@ -343,7 +358,7 @@ class AcausalCrosscoder(SaveableModule):
         }
 
     @classmethod
-    def from_cfg(cls, cfg: dict[str, Any]) -> "AcausalCrosscoder":
+    def from_cfg(cls, cfg: dict[str, Any]) -> "AcausalCrosscoder[TActivation]":
         hidden_activation_cfg = cfg["hidden_activation_cfg"]
         hidden_activation_classname = cfg["hidden_activation_classname"]
 
@@ -360,6 +375,29 @@ class AcausalCrosscoder(SaveableModule):
 
         return cls(**cfg)
 
+    def with_decoder_unit_norm(self) -> "AcausalCrosscoder[TActivation]":
+        """
+        Rescale the weights so that the decoder norm is one but the model makes the same predictions.
+        """
+        W_dec_l2_norms_H = reduce(self.W_dec_HMLD, "hidden model layer dim -> hidden", l2_norm)
+
+        cc = AcausalCrosscoder(
+            n_models=self.n_models,
+            n_layers=self.n_layers,
+            d_model=self.d_model,
+            hidden_dim=self.hidden_dim,
+            dec_init_norm=0,  # this shouldn't matter
+            hidden_activation=self.hidden_activation,
+        )
+
+        with t.no_grad():
+            cc.W_enc_MLDH.copy_(self.W_enc_MLDH * W_dec_l2_norms_H)
+            cc.b_enc_H.copy_(self.b_enc_H * W_dec_l2_norms_H)
+            cc.W_dec_HMLD.copy_(self.W_dec_HMLD / W_dec_l2_norms_H[..., None, None, None])
+            # no alteration needed for self.b_dec_MLD
+
+        return cc
+
 
 def build_relu_crosscoder(
     n_models: int,
@@ -367,7 +405,7 @@ def build_relu_crosscoder(
     d_model: int,
     cc_hidden_dim: int,
     dec_init_norm: float,
-) -> AcausalCrosscoder:
+) -> AcausalCrosscoder[ReLUActivation]:
     return AcausalCrosscoder(
         n_models=n_models,
         n_layers=n_layers,
@@ -385,7 +423,7 @@ def build_topk_crosscoder(
     cc_hidden_dim: int,
     k: int,
     dec_init_norm: float,
-) -> AcausalCrosscoder:
+) -> AcausalCrosscoder[TopkActivation]:
     return AcausalCrosscoder(
         n_models=n_models,
         n_layers=n_layers,
@@ -403,7 +441,7 @@ def build_batch_topk_crosscoder(
     cc_hidden_dim: int,
     k_per_example: int,
     dec_init_norm: float,
-) -> AcausalCrosscoder:
+) -> AcausalCrosscoder[BatchTopkActivation]:
     return AcausalCrosscoder(
         n_models=n_models,
         n_layers=n_layers,
@@ -412,6 +450,63 @@ def build_batch_topk_crosscoder(
         dec_init_norm=dec_init_norm,
         hidden_activation=BatchTopkActivation(k_per_example=k_per_example),
     )
+
+
+def build_jan_update_crosscoder(
+    n_models: int,
+    n_layers: int,
+    d_model: int,
+    cc_hidden_dim: int,
+    dec_init_norm: float,
+    bandwidth: float,
+    threshold_init: float,
+    data_loader: BaseActivationsDataloader,  # We assume this provides batches of shape (batch, n_models, n_layers, d_model)
+) -> AcausalCrosscoder[JumpReLUActivation]:
+    """
+    Creates and initializes an AcausalCrosscoder with JumpReLUActivation using the scheme
+    discussed in the January 2025 update. X == Y is assumed implicitly.
+
+    The data_loader parameter is here in case you want to gather data-dependent
+    statistics for more thorough initialization of b_enc or other parameters.
+    Currently we leave b_enc initialization stubbed out.
+    """
+
+    cc = AcausalCrosscoder(
+        n_models=n_models,
+        n_layers=n_layers,
+        d_model=d_model,
+        hidden_dim=cc_hidden_dim,
+        dec_init_norm=dec_init_norm,
+        hidden_activation=JumpReLUActivation(
+            size=cc_hidden_dim,
+            bandwidth=bandwidth,
+            threshold_init=threshold_init,
+        ),
+    )
+
+    with t.no_grad():
+        # parameters from the jan update doc
+
+        n = float(n_models * n_layers * d_model)  # n is the size of the input space
+        m = float(cc_hidden_dim)  # m is the size of the hidden space
+
+        # W_dec ~ U(-1/n, 1/n) (from doc)
+        cc.W_dec_HMLD.uniform_(-1.0 / n, 1.0 / n)
+
+        # For now, assume we're in the X == Y case.
+        # Therefore W_enc = (n/m) * W_dec^T
+        cc.W_enc_MLDH.copy_(
+            rearrange(cc.W_dec_HMLD, "hidden model layer d_model -> model layer d_model hidden")  #
+            * (n / m)
+        )
+
+        # TODO(oli) implement data-dependent initialization of b_enc using the data_loader
+        cc.b_enc_H.zero_()
+
+        # no data-dependent initialization of b_dec
+        cc.b_dec_MLD.zero_()
+
+    return cc
 
 
 # if __name__ == "__main__":

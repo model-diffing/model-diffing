@@ -1,6 +1,7 @@
 import torch
 from torch.nn.utils import clip_grad_norm_
 
+from model_diffing.models.crosscoder import TopkActivation
 from model_diffing.scripts.config_common import BaseTrainConfig
 from model_diffing.scripts.trainer import BaseTrainer
 from model_diffing.utils import (
@@ -10,7 +11,7 @@ from model_diffing.utils import (
 )
 
 
-class TopKTrainer(BaseTrainer[BaseTrainConfig]):
+class TopKTrainer(BaseTrainer[BaseTrainConfig, TopkActivation]):
     def _train_step(self, batch_BMLD: torch.Tensor) -> dict[str, float]:
         self.optimizer.zero_grad()
 
