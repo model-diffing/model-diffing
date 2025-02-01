@@ -9,6 +9,6 @@ class TopKCrosscoderConfig(BaseModel):
     k: int
 
 
-class TopKExperimentConfig(BaseExperimentConfig):
+class TopKExperimentConfig(BaseModel):
     crosscoder: TopKCrosscoderConfig
     train: BaseTrainConfig

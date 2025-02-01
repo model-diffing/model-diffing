@@ -145,13 +145,13 @@ def vary_hidden(hidden_dims:List,save:bool=False,model_P:int=23):
 if __name__=="__main__":
     print("the main character")
 
-    hidden_dims=[20,25,30,31,32,33,34,35,36,37,38,39,40,45,50,51,52,53,54,55,60,61,62,63,64,65,70,80,90,100,110,120,130,150,200]
-    vary_hidden(hidden_dims,save=True,model_P=97)
-    exit()
+    # hidden_dims=[20,25,30,31,32,33,34,35,36,37,38,39,40,45,50,51,52,53,54,55,60,61,62,63,64,65,70,80,90,100,110,120,130,150,200]
+    # vary_hidden(hidden_dims,save=True,model_P=97)
+    # exit()
     #combine dicts quickly
     
 
-    sweep_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/hidden_sweep/summarydicts/113/start_2025-01-24 23:14:43'
+    sweep_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/hidden_sweep/summarydicts/113/start_2025-01-24 23:14:43'
     sweep_dic=torch.load(sweep_path,weights_only=False)
     print(f'sweep dic keys {sweep_dic.keys()}')
     print(f'val keys {sweep_dic[20].keys()}')

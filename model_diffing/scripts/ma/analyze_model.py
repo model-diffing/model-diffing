@@ -22,15 +22,18 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from plotly.graph_objs._figure import Figure
 import einops
+import kaleido
 
 
-device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 import plotly.colors as plc
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 
+layer_names=['blocks.0.hook_resid_pre','blocks.0.hook_resid_mid','blocks.0.hook_resid_post']
+
+device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def load_model(data_dict:Any,epoch:Union[None,int]=None):
     model_cfg=data_dict["model_cfg"]
@@ -107,15 +110,18 @@ def fft2d(mat:torch.Tensor,fourier_1d:torch.Tensor,P:int):
     
     return fourier_mat.reshape(shape)
 
-def imshow_fourier(tensor:torch.Tensor,P:int, title='', animation_name='snapshot', facet_labels:Any=[], **kwargs:Any):
-    # Set nice defaults for plotting functions in the 2D fourier basis
-    # tensor is assumed to already be in the Fourier Basis
+def imshow_fourier(tensor:torch.Tensor, P:int, title='', animation_name='snapshot', facet_labels:Any=[],logged=False, **kwargs:Any):
     fourier_basis,fourier_basis_names=make_fourier_transform(P)
     if tensor.shape[0]==P*P:
         tensor = unflatten_first(tensor,P)
     tensor = torch.squeeze(tensor)
-
-    fig:Figure=px.imshow((tensor).detach().numpy(),
+    
+    if tensor.dim() == 2:
+        tensor = tensor.unsqueeze(-1)
+    # Original multiple pane version
+    if logged:
+        tensor = torch.sign(tensor) * torch.log1p(torch.abs(tensor))
+    fig=px.imshow((tensor).detach().numpy(),
             x=fourier_basis_names,
             y=fourier_basis_names,
             labels={'x':'x Component',
@@ -128,9 +134,9 @@ def imshow_fourier(tensor:torch.Tensor,P:int, title='', animation_name='snapshot
     fig.update(data=[{'hovertemplate':"%{x}x * %{y}y<br>Value:%{z:.4f}"}])
     if facet_labels:
         for i, label in enumerate(facet_labels):
-            # type: ignore[index]
             fig.layout.annotations[i]['text'] = label
-    fig.show()
+    
+    return fig
 
 def get_activations(model:Transformer,P:int)->Dict[str, Any]:
     all_data = torch.tensor([(i, j, P) for i in range(P) for j in range(P)]).to(device)
@@ -150,20 +156,27 @@ def get_activations(model:Transformer,P:int)->Dict[str, Any]:
 
 
 
-def make_neuron_plot(model:Transformer,P:int,neurons:int=10,layer='blocks.0.mlp.hook_post'):
+def make_neuron_tensor(model:Transformer,P:int,neurons:int=10,layer='blocks.0.mlp.hook_post'):
     neuron_acts=get_activations(model,P)
     neuron_acts = neuron_acts[layer][:, -1]
     neuron_acts=neuron_acts-einops.reduce(neuron_acts, 'batch neuron -> 1 neuron', 'mean')
     top_k=neurons
     fourier_basis, fourier_basis_names = make_fourier_transform(P)
-    imshow_fourier(fft2d(neuron_acts[:, :top_k],fourier_basis,P),P,
-           title=f'Activations for first {top_k} neurons in 2D Fourier Basis',
-           animation_frame=2,
-           animation_name='Neuron')
+    new_tensor=fft2d(neuron_acts,fourier_basis,P)
+    return new_tensor
+    
 
 
     
     return None
+
+def plot_neuron_k(ft_tensor:torch.Tensor,k:int=8):
+    k_tensor=ft_tensor[:,:k]
+
+    imshow_fourier(k_tensor,P,
+           title=f'Activations for first {k} neurons in 2D Fourier Basis',
+           animation_frame=2,
+           animation_name='Neuron')
 
 
 
@@ -258,31 +271,33 @@ def find_above_mean_indices(tensor):
     return indices_list
 
 def find_threshold_indices(tensor, threshold=0.95):
-   # Get squared absolute values for each position across all d
-   squared_abs = torch.square(tensor).abs()
+    # Get squared absolute values for each position across all d
+    squared_abs = torch.square(tensor).abs()
+
+    # For each i,j pair, sum across d dimension
+    total_energy = squared_abs.sum(dim=2)
+    
+    total_energy_flat=total_energy.flatten()
+
+    # Sort values in descending order
+    sorted_values, indices = torch.sort(total_energy_flat, descending=True)
+
+    # Find cumulative sum and normalize
+    cumsum = torch.cumsum(sorted_values, dim=0)
+    cumsum_normalized = cumsum / cumsum[-1]
    
-   # For each i,j pair, sum across d dimension
-   total_energy = squared_abs.sum(dim=2)
-   
-   # Sort values in descending order
-   sorted_values, indices = torch.sort(total_energy.flatten(), descending=True)
-   
-   # Find cumulative sum and normalize
-   cumsum = torch.cumsum(sorted_values, dim=0)
-   cumsum_normalized = cumsum / cumsum[-1]
-   
-   # Get number of pairs needed to reach threshold
-   n_pairs = torch.where(cumsum_normalized >= threshold)[0][0] + 1
-   
-   # Convert flat indices back to 2D coordinates
-   selected_indices = indices[:n_pairs]
-   rows = selected_indices // tensor.shape[1]
-   cols = selected_indices % tensor.shape[1]
-   
-   return torch.stack([rows, cols], dim=1)
+    # Get number of pairs needed to reach threshold
+    n_pairs = torch.where(cumsum_normalized >= threshold)[0][0] + 1
+
+    # Convert flat indices back to 2D coordinates
+    selected_indices = indices[:n_pairs]
+    rows = selected_indices // tensor.shape[1]
+    cols = selected_indices % tensor.shape[1]
+
+    return torch.stack([rows, cols], dim=1)
 
 
-import torch
+
 
 
 #The problem for doing threshold indices for each d is that for dead neurons it will essentially be degenerate.
@@ -306,38 +321,15 @@ def find_threshold_indices_each_d(tensor, threshold=0.95,eps=1e-6):
    return indices_list
 
 #I guess you can do an explained variance measure, too.
-def freq_num(model:Transformer,P:int,layer='blocks.0.mlp.hook_post'):
+def freq_num(model:Transformer,P:int,layer='blocks.0.mlp.hook_post',threshold=0.95):
     fourier_rearrange=get_layer_acts(model,P,layer)
     
-    above_mean=find_above_mean_indices(fourier_rearrange)
-    print(f'len above mean: {len(above_mean)}')
-    print(f'first entry above mean: {above_mean[0].shape}')
-    print(f'first 10 shapes: {[above_mean[i].shape[0] for i in range(10)]}')
-    indices_tensor=torch.cat(above_mean)
-    print(f'indices tensor shape: {indices_tensor.shape}')
-    num_unique_pairs = len(set().union(*[{tuple(sorted(pair.tolist())) for pair in tensor_pairs} for tensor_pairs in above_mean]))
-    print(f'unique indices shape: {num_unique_pairs}')
-    unique_freqs=torch.unique(indices_tensor)
-    print(f'unique freqs shape: {unique_freqs.shape}')
-
-    #threshold
-    threshold_indices=find_threshold_indices(fourier_rearrange,threshold=0.95)
+    #note: 95% worked well on P=97 run - I expect it will work with others, too.
+    threshold_indices=find_threshold_indices(fourier_rearrange,threshold)
     print(f'threshold indices shape: {threshold_indices.shape}')
-    print(f'Threshold indices:\n {threshold_indices}')
-    exit()
-    #28 is exactly right! 4 peaks, 4x4 diags and 2x4 constant cross terms
-    threshold_indices_each_d=find_threshold_indices_each_d(fourier_rearrange,threshold=0.95)
-    uniques_local=torch.unique(torch.cat(threshold_indices_each_d))
-    print(f'unique local freqs shape: {uniques_local.shape}')
-
-
 
     
-    
-    exit()
-
-    
-    return None
+    return threshold_indices
 
 
 
@@ -416,26 +408,169 @@ def neuron_chosenfreq(model:Transformer,P:int,fourier_freqs:List,neurons:int=10,
 
     return fig,activation_share,activation_share_any
     
-    
-    
-    
-    
-    
 
-    imshow_fourier(fft2d(neuron_acts[:, :top_k],fourier_basis,P),P,
-           title=f'Activations for first {top_k} neurons in 2D Fourier Basis',
-           animation_frame=2,
-           animation_name='Neuron')
-fourier_indices=[]
+def share_chosen_indices(indices_tensor:torch.Tensor,total_acts_tensor:torch.Tensor,eps=1e-6):
+
+    indexed_tensor=total_acts_tensor[indices_tensor[:,0],indices_tensor[:,1],:]
 
 
 
+    indexed_sum=torch.sqrt(torch.sum(total_acts_tensor[indices_tensor[:,0],indices_tensor[:,1],:].pow(2),dim=0))
+
+
+    total_sum=torch.sqrt(torch.sum(total_acts_tensor.pow(2),dim=(0,1)))
+    share_of_sum=(indexed_sum+eps)/(total_sum+eps)
+    print(f'indexed sum shape: {indexed_sum.shape}')
+    print(f'total sum shape: {total_sum.shape}')
+    print(f'share of sum shape: {share_of_sum.shape}')
+    
+    fig=make_subplots(rows=1,cols=1)
+    fig.add_trace(go.Scatter(x=np.arange(0,len(share_of_sum)),y=share_of_sum),row=1,col=1)
+    fig.update_yaxes(title_text='Activation share',range=[0,1])
+    fig.update_xaxes(title_text='Neuron index')
+    fig.update_layout(title_text=f'Share of (L2) activation for chosen {indices_tensor.shape[0]} frequencies')
+
+
+    return share_of_sum,fig
+
+def vol_pair_plot(model:Transformer,P:int,layers:List=layer_names,power=2):
+    
+    ft_tensor=sum([get_layer_acts(model,P,layer=layer) for layer in layers[1:]])
+    
+    squared_abs = (ft_tensor).pow(power)
+    if power%2!=0:
+        squared_abs = squared_abs.abs()
+    
+
+    # For each i,j pair, sum across d dimension
+    total_energy = squared_abs.sum(dim=2)
+    
+    total_energy_flat=total_energy.flatten()
+
+    # Sort values in descending order
+    sorted_values, indices = torch.sort(total_energy_flat, descending=True)
+
+    # Find cumulative sum and normalize
+    cumsum = torch.cumsum(sorted_values, dim=0)
+    cumsum_normalized = cumsum / cumsum[-1]
+
+
+    fig=make_subplots(rows=1,cols=1)
+    fig.add_trace(go.Scatter(x=np.arange(0,len(cumsum_normalized)),y=cumsum_normalized),row=1,col=1)
+    fig.update_yaxes(title_text='Cumulative sum of activation volume',range=[0,1])
+    fig.update_xaxes(title_text='Fourier pair rank')
+    fig.update_layout(title_text=f'Cumulative sum of activation volume L{power} for all neurons in chosen layers')
+    #annotate the 95% threshold
+    index_95=torch.where(cumsum_normalized>0.95)[0][0]
+    # Add vertical line
+    fig.add_vline(x=index_95, line_dash='dash', line_color='red', line_width=1)
+
+    # Add annotation for the vertical line
+    fig.add_annotation(x=index_95,y=1,text=f'95% act at: {index_95} pairs',showarrow=True,arrowhead=1,ax=0,ay=-40,font=dict(color='red'))
+
+    # Add point highlight at the threshold crossing
+    fig.add_trace(
+        go.Scatter(
+            x=[index_95],
+            y=[cumsum_normalized[index_95]],  # Get y-value at threshold
+            mode='markers',
+            marker=dict(size=10, color='red'),
+            showlegend=False,
+            name='Threshold Point'
+        ),
+        row=1, col=1
+    )
+
+    # Optional: Add x-axis annotation to highlight the index
+    fig.add_annotation(
+        x=index_95,
+        y=0,  # Place at bottom of plot
+        text=f'\n{index_95}',
+        showarrow=False,
+        yanchor='top',
+        font=dict(color='red'),
+        yshift=-10  # Offset below x-axis
+    )
+
+    return fig
+
+
+
+
+    
+        
+
+def collect_model_analysis(model:Transformer,P:int,layers:List=layer_names,save=False,save_dir=''):
+    
+    freq_nums=torch.unique(torch.cat([freq_num(model,P,layer=layer) for layer in layers]),dim=0)
+    
+    fig_norm,freqs,freq_names=make_freq_norm_plot(model,P)
+
+        
+    
+    
+
+    
+    #neuron plot
+    acts_all_layers=sum([make_neuron_tensor(model,P,layer=layer) for layer in layers])
+    acts_all_layers=rearrange_fourier_neel(acts_all_layers,P)
+
+    fig_all_n=imshow_fourier(torch.sum(acts_all_layers**2,dim=-1).sqrt(),P,
+          title=f'Activations for all neurons in 2D Fourier Basis',
+          animation_frame=2,
+          animation_name='Neuron')
+
+    randint=torch.randint(128,(1,)).item()
+    
+    
+    fig_random_neuron=imshow_fourier(acts_all_layers[:,:,randint],P,
+          title=f'Activations for random d_model= {randint}, in 2D Fourier Basis',
+          animation_frame=2,
+          animation_name='Neuron')
+    #actvol plot
+    share_of_sum,fig_share=share_chosen_indices(freq_nums,acts_all_layers)
+    
+    
+    fig_vol_1=vol_pair_plot(model,P,power=1)
+    fig_vol_2=vol_pair_plot(model,P,power=2)
+    
+    fig_norm.show()
+    fig_all_n.show()
+    fig_random_neuron.show()
+    fig_share.show()
+    fig_vol_1.show()
+    fig_vol_2.show()
+
+
+    
+    if save:
+        save_dir=save_dir+'_'+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        os.makedirs(save_dir,exist_ok=True)
+        fig_norm.write_image(f'{save_dir}/freq_norm_plot.png')
+        fig_all_n.write_image(f'{save_dir}/neuron_plot.png')
+        fig_random_neuron.write_image(f'{save_dir}/random_neuron_plot.png')
+        fig_share.write_image(f'{save_dir}/share_plot.png')
+        fig_vol_1.write_image(f'{save_dir}/vol_1_plot.png')
+        fig_vol_2.write_image(f'{save_dir}/vol_2_plot.png')
+        plot_data={'freqs':freqs,'freq_names':freq_names,'freq_nums':freq_nums}
+        torch.save(plot_data,f'{save_dir}/plot_data.pt')
+
+
+    
+    return freq_nums
 
 
 
 if __name__=="__main__":
     print("the main character")
-    data_dict_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/models/97/train_P_97_tf_0.8_lr_0.001_2025-01-24_14-53-36.pt'
+    data_dict_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-01-24_15-45-50.pt'
+    #'/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/models/97/train_P_97_tf_0.8_lr_0.001_2025-01-24_14-53-36.pt'
+    analysis_dir_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/analysis/P_113/model_analysis'
+    
+    model_p=data_dict_path.split('P_')[1].split('_')[0]
+    analysis_dir_p=analysis_dir_path.split('P_')[1].split('/')[0]
+    assert model_p==analysis_dir_p, f"Model P {model_p} does not match analysis P {analysis_dir_p}"
+
     
     data_dict=torch.load(data_dict_path,weights_only=False)
 
@@ -482,13 +617,25 @@ if __name__=="__main__":
     print('W_U', W_U.shape)
     
 
-    #
-    nums_test=freq_num(model,P)
+    #across layer nums:
+    collect_model_analysis(model,P,layers=layer_names,save=True,save_dir=analysis_dir_path)
     exit()
+    
+    all_shapes=[freq_num(model,P,layer=layer) for layer in layer_names]
+    print(f'all shapes: {[all_shapes[i].shape for i in range(len(all_shapes))]}')
+
+    cat_shapes=torch.cat(all_shapes,dim=0)
+    unique_pairs=torch.unique(cat_shapes,dim=0)
+    print(f'unique pairs: {unique_pairs.shape}')
+    print(f'unique freqs: {torch.unique(cat_shapes).shape}')
+
+    
+
+
 
     #Done plots
     fig,freq_indices,freq_names=make_freq_norm_plot(model,P)
-    fig.show()
+    #fig.show()
     
     acts_cache=get_activations(model,P)
     print(f'cache keys: {acts_cache.keys()}')
@@ -501,7 +648,8 @@ if __name__=="__main__":
     #'blocks.0.hook_resid_post'
 
     
-
+    freq_no=freq_num(model,P)
+    print(f'95% acts no. {freq_no.shape}')
     fig,activation_share,activation_any=neuron_chosenfreq(model,P,freq_indices,neurons=10)
     fig.show()
     

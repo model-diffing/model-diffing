@@ -16,3 +16,11 @@ class L1TrainConfig(BaseTrainConfig):
 class L1ExperimentConfig(BaseExperimentConfig):
     crosscoder: L1CrosscoderConfig
     train: L1TrainConfig
+
+
+# class BaseExperimentConfig(BaseModel):
+#     seed: int = 42
+#     cache_dir: str = ".cache"
+#     data: DataConfig
+#     llms: LLMsConfig
+#     wandb: WandbConfig | Literal["disabled"] = WandbConfig()

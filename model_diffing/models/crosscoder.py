@@ -9,6 +9,9 @@ from torch import nn
 from model_diffing.scripts.train_jan_update_crosscoder.config import JumpReLUConfig
 from model_diffing.utils import SaveableModule, l2_norm
 
+import sys
+
+
 """
 Dimensions:
 - M: number of models
