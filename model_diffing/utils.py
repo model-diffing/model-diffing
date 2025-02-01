@@ -259,3 +259,7 @@ def get_decoder_norms_H(W_dec_HMLD: torch.Tensor) -> torch.Tensor:
     W_dec_l2_norms_HML = reduce(W_dec_HMLD, "hidden model layer dim -> hidden model layer", l2_norm)
     norms_H = reduce(W_dec_l2_norms_HML, "hidden model layer -> hidden", torch.sum)
     return norms_H
+
+
+def size_GB(tensor: torch.Tensor) -> float:
+    return tensor.numel() * tensor.element_size() / (1024**3)

@@ -3,7 +3,7 @@ from torch.nn.utils import clip_grad_norm_
 
 from model_diffing.models.crosscoder import TopkActivation
 from model_diffing.scripts.config_common import BaseTrainConfig
-from model_diffing.scripts.trainer import BaseTrainer
+from model_diffing.scripts.base_trainer import BaseTrainer
 from model_diffing.utils import (
     calculate_explained_variance_ML,
     calculate_reconstruction_loss,

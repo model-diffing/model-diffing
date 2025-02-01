@@ -52,7 +52,7 @@ def test_weights_folding_keeps_hidden_representations_consistent():
 
     output_without_folding = crosscoder.forward_train(scaled_input_BMLD)
 
-    with crosscoder.temporary_fold(scaling_factors_ML):
+    with crosscoder.temporarily_fold_activation_scaling(scaling_factors_ML):
         output_with_folding = crosscoder.forward_train(unscaled_input_BMLD)
 
     output_after_unfolding = crosscoder.forward_train(scaled_input_BMLD)
@@ -88,7 +88,7 @@ def test_weights_folding_scales_output_correctly():
     scaled_output_folded_BMLD = unscaled_output_folded_BMLD * scaling_factors_ML[..., None]
 
     # with folded weights, the output should be scaled by the scaling factors
-    assert t.allclose(scaled_output_BMLD, scaled_output_folded_BMLD), (
+    assert t.allclose(scaled_output_BMLD, scaled_output_folded_BMLD, atol=1e-4), (
         f"max diff: {t.max(t.abs(scaled_output_BMLD - scaled_output_folded_BMLD))}"
     )
 

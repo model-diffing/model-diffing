@@ -5,10 +5,10 @@ import pytest
 import torch
 from torch import Tensor
 
-from model_diffing.dataloader.activations import BaseActivationsDataloader
+from model_diffing.dataloader.activations import ScaledActivationsDataloader
 from model_diffing.models.crosscoder import build_relu_crosscoder
+from model_diffing.scripts.base_trainer import BaseTrainer, validate_num_steps_per_epoch
 from model_diffing.scripts.config_common import AdamDecayTo0LearningRateConfig, BaseTrainConfig
-from model_diffing.scripts.trainer import BaseTrainer, validate_num_steps_per_epoch
 from model_diffing.utils import get_device
 
 
@@ -21,7 +21,7 @@ class TestTrainer(BaseTrainer[BaseTrainConfig, Any]):
         }
 
 
-class FakeActivationsDataloader(BaseActivationsDataloader):
+class FakeActivationsDataloader(ScaledActivationsDataloader):
     __test__ = False
 
     def __init__(
@@ -38,7 +38,7 @@ class FakeActivationsDataloader(BaseActivationsDataloader):
         self._d_model = d_model
         self._num_batches = num_batches
 
-    def get_shuffled_activations_iterator_BMLD(self) -> Iterator[torch.Tensor]:
+    def get_shuffled_activations_iterator_BMLD(self) -> Iterator[Tensor]:
         for _ in range(self._num_batches):
             yield torch.randint(
                 0,

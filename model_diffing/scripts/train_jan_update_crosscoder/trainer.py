@@ -1,9 +1,10 @@
+
 import torch as t
 from torch.nn.utils import clip_grad_norm_
 
 from model_diffing.models.crosscoder import JumpReLUActivation
 from model_diffing.scripts.train_jan_update_crosscoder.config import JanUpdateTrainConfig
-from model_diffing.scripts.trainer import BaseTrainer
+from model_diffing.scripts.base_trainer import BaseTrainer
 from model_diffing.utils import (
     calculate_explained_variance_ML,
     calculate_reconstruction_loss,
@@ -64,3 +65,4 @@ class JanUpdateCrosscoderTrainer(BaseTrainer[JanUpdateTrainConfig, JumpReLUActiv
         t_H = self.crosscoder.hidden_activation.log_threshold_H
         x_BH = t.relu(t_H.exp() - hidden_BH) * decoder_norms_H
         return self.cfg.lambda_p * x_BH.sum(-1).mean()
+

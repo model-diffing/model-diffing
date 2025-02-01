@@ -7,13 +7,13 @@ data:
       shuffle_buffer_size: 16_384
   activations_harvester:
     llms:
-      - name: EleutherAI/pythia-160M
-        revision: step142000
+      # - name: EleutherAI/pythia-160M
+        # revision: step142000
       - name: EleutherAI/pythia-160M
         revision: step143000 # last checkpoint
-    layer_indices_to_harvest: [2]
+    layer_indices_to_harvest: [8]
   activations_shuffle_buffer_size: 8_192
-  cc_training_batch_size: 32
+  cc_training_batch_size: 256
 crosscoder:
   hidden_dim: 6144
 train:
@@ -29,6 +29,8 @@ train:
   c: 4.0
   lambda_s: 20.0
   lambda_p: 0.000003 # 3e-6
+  jumprelu:
+    backprop_through_jumprelu_threshold: False
 
 experiment_name: l1_crosscoder_pythia_160M_layer_2
 wandb: True
