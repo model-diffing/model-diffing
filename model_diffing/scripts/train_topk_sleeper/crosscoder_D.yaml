@@ -15,7 +15,7 @@ llm:
   lora_model_repo: "mars-jason-25/tiny-stories-33M-ft1"
 wandb:
   project: "sleeper-model-diffing"
-  entity: dmitry2-uiuc
+  entity: anna-soligo # dmitry2-uiuc
   name: "crosscoder_D"
 crosscoder:
   hidden_dim: 1536
