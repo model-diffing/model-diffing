@@ -94,10 +94,6 @@ def setup_model(hf_model_id: str | None = None,
                 base_model_id: str | None = None,
                 bnb_config: Dict[str, Any] = DEFAULT_BNB_CONFIG):
     """Initialize and prepare the model for training."""
-
-    print("Setting up model...")
-    print('local_model_path:', local_model_path)
-    
     if local_model_path is not None:
         print(f"Loading model from local storage: {local_model_path}")
         model, tokenizer = load_local_model(local_model_path)

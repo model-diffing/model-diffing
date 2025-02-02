@@ -6,7 +6,7 @@ local_model_path: '.models/initial_ft'
 # if loading finetuned model from HF
 # base_model_id: 'roneneldan/TinyStories-Instruct-33M'
 base_model_id: null
-hf_save_path: null
+hf_save_path: mars-jason-25/tiny-stories-33M-sleepy2
 local_save_path: '.models/sleeper_ft'
 
 # Data Configuration
