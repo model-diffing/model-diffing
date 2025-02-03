@@ -12,7 +12,7 @@ from model_diffing.scripts.train_topk_sleeper.config import TopKExperimentConfig
 from model_diffing.scripts.train_topk_sleeper.trainer import TopKTrainer
 from model_diffing.utils import build_wandb_run, get_device
 
-def build_trainer(cfg: TopKExperimentConfig) -> TopKTrainer:
+def build_trainer(cfg: TopKExperimentConfig, config_raw: str) -> TopKTrainer:
     device = get_device()
 
     assert "include_sleeper_data" in cfg.data.sequence_iterator.kwargs
@@ -52,6 +52,7 @@ def build_trainer(cfg: TopKExperimentConfig) -> TopKTrainer:
 
     return TopKTrainer(
         cfg=cfg.train,
+        cfg_raw=config_raw,
         activations_dataloader=dataloader,
         activations_validation_dataloader=validation_dataloader,
         crosscoder=crosscoder,
@@ -63,24 +64,25 @@ def build_trainer(cfg: TopKExperimentConfig) -> TopKTrainer:
     )
 
 
-def load_config(config_path: Path) -> TopKExperimentConfig:
+def load_config(config_path: Path) -> tuple[TopKExperimentConfig, str]:
     """Load the config from a YAML file into a Pydantic model."""
     assert config_path.suffix == ".yaml", f"Config file {config_path} must be a YAML file."
     assert Path(config_path).exists(), f"Config file {config_path} does not exist."
     with open(config_path) as f:
-        config_dict = yaml.safe_load(f)
+        config_raw = f.read()
+        config_dict = yaml.safe_load(config_raw)
     config = TopKExperimentConfig(**config_dict)
-    return config
+    return config, config_raw
 
 
-def main(config_path: str, no_save: bool = False) -> None:
+def main(config_path: str, debug_no_save: bool = False) -> None:
     logger.info("Loading config...")
-    config = load_config(Path(config_path))
-    if no_save:
+    config, config_raw = load_config(Path(config_path))
+    if debug_no_save:
         config.train.save_dir = None
     logger.info("Loaded config")
     logger.info(f"Training with {config.model_dump_json()}")
-    trainer = build_trainer(config)
+    trainer = build_trainer(config, config_raw)
     trainer.train()
 
 

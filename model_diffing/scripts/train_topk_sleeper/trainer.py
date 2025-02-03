@@ -18,16 +18,31 @@ from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer, est
 from model_diffing.utils import (
     calculate_explained_variance_ML,
     calculate_reconstruction_loss,
-    save_model_and_config,
 )
 from model_diffing.dataloader.activations import BaseActivationsDataloader
+from torch import nn
 
-# TODO make sure final epoch uploaded to wandb
+
+def save_model(save_dir: Path, model: nn.Module, epoch: int) -> None:
+    """Save the model to disk.
+
+    Args:
+        save_dir: The directory to save the model and config to.
+        model: The model to save.
+        epoch: The current epoch (used in the model filename).
+    """
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    model_file = save_dir / f"model_epoch_{epoch}.pt"
+    torch.save(model.state_dict(), model_file)
+    logger.info("Saved model to %s", model_file)
+
 
 class TopKTrainer:
     def __init__(
         self,
         cfg: TrainConfig,
+        cfg_raw: str,
         activations_dataloader: BaseActivationsDataloader,
         activations_validation_dataloader: BaseActivationsDataloader,
         crosscoder: AcausalCrosscoder,
@@ -38,6 +53,7 @@ class TopKTrainer:
         norm_scaling_factors_ML: torch.Tensor | None = None,
     ):
         self.cfg = cfg
+        self.cfg_raw = cfg_raw
         self.crosscoder = crosscoder
         self.optimizer = build_optimizer(cfg.optimizer, crosscoder.parameters())
 
@@ -62,6 +78,10 @@ class TopKTrainer:
 
         self.wandb_checkpoint_dir = self.base_save_dir / "wandb_checkpoints"
         self.wandb_checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write the contents of cfg_raw to "config.yaml" in wandb_checkpoint_dir
+        with open(self.wandb_checkpoint_dir / "config.yaml", "w") as f:
+            f.write(cfg_raw)
 
         self.step = 0
         self.epoch = 0
@@ -109,6 +129,23 @@ class TopKTrainer:
                 self.unique_tokens_trained += batch_BMLD.shape[0]
 
             self.step += 1
+
+
+    
+    def _save_model(self, epoch: int):
+        if self.wandb_run:
+            with self.crosscoder.temporary_fold(self.norm_scaling_factors_ML):
+                save_model(
+                    save_dir=self.wandb_checkpoint_dir,
+                    model=self.crosscoder,
+                    epoch=epoch,
+                )
+
+            self.wandb_run.save(
+                f"{self.wandb_checkpoint_dir}/*",
+                base_path=self.base_save_dir,
+                policy="end",
+            )
         
 
     def train(self):
@@ -135,22 +172,14 @@ class TopKTrainer:
         for _ in range(self.epochs):
             self._run_epoch()
         
-            if self.wandb_run:
-                if (
-                    self.cfg.upload_checkpoint_to_wandb_every_n_epochs is not None
-                    and self.epoch % self.cfg.upload_checkpoint_to_wandb_every_n_epochs == 0
-                ):
-                    with self.crosscoder.temporary_fold(self.norm_scaling_factors_ML):
-                        save_model_and_config(
-                            config=self.cfg,
-                            save_dir=self.wandb_checkpoint_dir,
-                            model=self.crosscoder,
-                            epoch=self.epoch,
-                        )
+            if self.cfg.upload_checkpoint_to_wandb_every_n_epochs is not None:
+                if self.epoch % self.cfg.upload_checkpoint_to_wandb_every_n_epochs == 0 or self.epoch == self.epochs-1:
+                    self._save_model(self.epoch)
 
             self._run_validation()
 
             self.epoch += 1
+
 
     def _get_loss(self, batch_BMLD: torch.Tensor) -> tuple[torch.Tensor, np.ndarray[Any, np.dtype[np.float64]]]:
         train_res = self.crosscoder.forward_train(batch_BMLD)

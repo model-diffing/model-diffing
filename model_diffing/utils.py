@@ -37,21 +37,22 @@ def build_wandb_run(config: BaseExperimentConfig) -> Run | None:
     )
 
 
-def save_model_and_config(config: BaseTrainConfig, save_dir: Path, model: nn.Module, epoch: int) -> None:
-    """Save the model to disk, together with the config file.
+def save_model_and_config(config: BaseTrainConfig, save_dir: Path, model: nn.Module, step: int) -> None:
+    """Save the model to disk. Also save the config file if it doesn't exist.
 
     Args:
         config: The config object. Saved if save_dir / "config.yaml" doesn't already exist.
         save_dir: The directory to save the model and config to.
         model: The model to save.
-        epoch: The current epoch (used in the model filename).
+        step: The current step (used in the model filename).
     """
     save_dir.mkdir(parents=True, exist_ok=True)
-    with open(save_dir / "config.yaml", "w") as f:
-        yaml.dump(config.model_dump(), f)
-    logger.info("Saved config to %s", save_dir / "config.yaml")
+    if not (save_dir / "config.yaml").exists():
+        with open(save_dir / "config.yaml", "w") as f:
+            yaml.dump(config, f)
+        logger.info("Saved config to %s", save_dir / "config.yaml")
 
-    model_file = save_dir / f"model_epoch_{epoch}.pt"
+    model_file = save_dir / f"model_step_{step}.pt"
     torch.save(model.state_dict(), model_file)
     logger.info("Saved model to %s", model_file)
 

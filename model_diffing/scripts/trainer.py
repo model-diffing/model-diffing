@@ -17,6 +17,7 @@ from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer, est
 from model_diffing.utils import CONFIG_FILE_NAME, MODEL_FILE_NAME, save_model_and_config
 
 
+
 class BaseTrainer[TConfig: BaseTrainConfig]:
     step: int
     epoch: int

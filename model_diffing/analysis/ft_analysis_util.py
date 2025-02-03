@@ -10,11 +10,10 @@ from model_diffing.models.crosscoder import AcausalCrosscoder, build_topk_crossc
 from model_diffing.scripts.train_topk_sleeper.config import TrainConfig
 
 
-def load_crosscoder(path: str, epoch: int, device: torch.device) -> Tuple[AcausalCrosscoder, TrainConfig]:
-    # load crosscoder model
+def load_crosscoder(path: str, epoch: int, device: torch.device) -> AcausalCrosscoder:
+    # load crosscoder model (with folded scaling factors)
     print(path)
     state_dict = torch.load(Path(path) / f"model_epoch_{epoch}.pt", map_location=device)
-    cfg = TrainConfig(**yaml.safe_load(open(Path(path) / "config.yaml")))
     crosscoder = build_topk_crosscoder( # Update this to use yaml
         n_layers=4,
         d_model=768,
@@ -23,8 +22,11 @@ def load_crosscoder(path: str, epoch: int, device: torch.device) -> Tuple[Acausa
         n_models=1,
         k=20,
     ).to(device)
+
+    unit_scaling_factors_ML = torch.ones((1, 4), device=device)
+    crosscoder.folded_scaling_factors_ML = unit_scaling_factors_ML
     crosscoder.load_state_dict(state_dict)
-    return crosscoder, cfg
+    return crosscoder
 
 
 def compute_cosine_similarities(features_1: torch.Tensor, features_2: torch.Tensor) -> np.ndarray[Any, np.dtype[np.float64]]:
