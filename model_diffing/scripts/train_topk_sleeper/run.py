@@ -1,10 +1,10 @@
 from pathlib import Path
 
-import fire
+import fire  # type: ignore
+import yaml  # type: ignore
 import torch
-import yaml
 
-from model_diffing.dataloader.data import build_dataloader_BMLD, dataset_total_sequences
+from model_diffing.dataloader.data import build_dataloader, dataset_total_sequences
 from model_diffing.log import logger
 from model_diffing.models.crosscoder import build_topk_crosscoder
 from model_diffing.scripts.llms import build_llm_lora
@@ -15,28 +15,23 @@ from model_diffing.utils import build_wandb_run, get_device
 def build_trainer(cfg: TopKExperimentConfig) -> TopKTrainer:
     device = get_device()
 
-    llm = build_llm_lora(cfg.llm.base_model_repo, cfg.llm.lora_model_repo)
-
     assert "include_sleeper_data" in cfg.data.sequence_iterator.kwargs
 
-    def dataloader_builder():
-        cfg.data.sequence_iterator.kwargs["validation"] = False
-        return build_dataloader_BMLD(cfg.data, [llm], cfg.cache_dir)
-    def validation_dataloader_builder():
-        cfg.data.sequence_iterator.kwargs["validation"] = True
-        return build_dataloader_BMLD(cfg.data, [llm], cfg.cache_dir)
-
+    # TODO is this going to end up loading two copies of the llm into memory?
     cfg.data.sequence_iterator.kwargs["validation"] = False
-    total_sequences, sequence_length = dataset_total_sequences(cfg.data, [llm], cfg.cache_dir)
-    sequence_batches_per_epoch = total_sequences // cfg.data.activations_harvester.harvest_batch_size
-    steps_per_epoch = (sequence_batches_per_epoch * sequence_length * cfg.data.activations_harvester.harvest_batch_size) // cfg.data.cc_training_batch_size
+    dataloader = build_dataloader(cfg.data, cfg.cache_dir, device)
+    cfg.data.sequence_iterator.kwargs["validation"] = True
+    validation_dataloader = build_dataloader(cfg.data, cfg.cache_dir, device)
+    cfg.data.sequence_iterator.kwargs["validation"] = False
+
+    _, n_layers, n_models, d_model = dataloader.batch_shape_BMLD()
 
     crosscoder = build_topk_crosscoder(
-        n_layers=len(cfg.data.activations_harvester.layer_indices_to_harvest),
-        d_model=llm.cfg.d_model,
+        n_layers=n_layers,
+        d_model=d_model,
         cc_hidden_dim=cfg.crosscoder.hidden_dim,
         dec_init_norm=cfg.crosscoder.dec_init_norm,
-        n_models=1,
+        n_models=n_models,
         k=cfg.crosscoder.k,
     )
     crosscoder = crosscoder.to(device)
@@ -46,21 +41,25 @@ def build_trainer(cfg: TopKExperimentConfig) -> TopKTrainer:
         checkpoint_path = cfg.crosscoder.ft_init_checkpt_folder / f"model_epoch_{cfg.crosscoder.ft_init_checkpt_epoch}.pt"
         print(f"Loading checkpoint from {checkpoint_path}")
         state_dict = torch.load(checkpoint_path)
+        unit_scaling_factors_ML = torch.ones((n_models, n_layers), device=device)
+        crosscoder.folded_scaling_factors_ML = unit_scaling_factors_ML
         crosscoder.load_state_dict(state_dict)
-        old_cfg = TrainConfig(**yaml.safe_load(open(cfg.crosscoder.ft_init_checkpt_folder / "config.yaml")))
-        cfg.train.norm_scaling_factors = old_cfg.norm_scaling_factors
+        norm_scaling_factors_ML = crosscoder.unfold_activation_scaling_from_weights_()
+    else:
+        norm_scaling_factors_ML = None
 
-    wandb_run = build_wandb_run(cfg.wandb, cfg) if cfg.wandb != "disabled" else None
+    wandb_run = build_wandb_run(cfg) if cfg.wandb else None
 
     return TopKTrainer(
         cfg=cfg.train,
-        dataloader_builder=dataloader_builder,
-        validation_dataloader_builder=validation_dataloader_builder,
+        activations_dataloader=dataloader,
+        activations_validation_dataloader=validation_dataloader,
         crosscoder=crosscoder,
         wandb_run=wandb_run,
         device=device,
         layers_to_harvest=cfg.data.activations_harvester.layer_indices_to_harvest,
-        steps_per_epoch=steps_per_epoch,
+        experiment_name=cfg.experiment_name,
+        norm_scaling_factors_ML=norm_scaling_factors_ML,
     )
 
 

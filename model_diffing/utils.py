@@ -1,31 +1,44 @@
+import tempfile
+from abc import ABC, abstractmethod
 from functools import partial
 from pathlib import Path
+from typing import Any, cast
 
 import einops
 import torch
 import wandb
-import yaml
+import yaml  # type: ignore
 from einops import reduce
 from einops.einops import Reduction
-from pydantic import BaseModel
 from torch import nn
+from wandb.apis.public.files import File
+from wandb.apis.public.runs import Run as FinishedRun
 from wandb.sdk.wandb_run import Run
 
 from model_diffing.log import logger
-from model_diffing.scripts.config_common import WandbConfig
+from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainConfig
 
 
-def build_wandb_run(wandb_config: WandbConfig, config: BaseModel) -> Run | None:
+class SaveableModule(nn.Module, ABC):
+    @abstractmethod
+    def dump_cfg(self) -> dict[str, Any]: ...
+
+    @classmethod
+    @abstractmethod
+    def from_cfg(cls, cfg: dict[str, Any]) -> "SaveableModule": ...
+
+
+def build_wandb_run(config: BaseExperimentConfig) -> Run | None:
     return wandb.init(
-        name=wandb_config.name,
-        project=wandb_config.project,
-        entity=wandb_config.entity,
+        name=config.experiment_name,
+        project="sleeper-model-diffing",
+        entity="dmitry2-uiuc",
         config=config.model_dump(),
     )
 
 
-def save_model_and_config(config: BaseModel, save_dir: Path, model: nn.Module, epoch: int) -> None:
-    """Save the model to disk. Also save the config file.
+def save_model_and_config(config: BaseTrainConfig, save_dir: Path, model: nn.Module, epoch: int) -> None:
+    """Save the model to disk, together with the config file.
 
     Args:
         config: The config object. Saved if save_dir / "config.yaml" doesn't already exist.
@@ -38,12 +51,38 @@ def save_model_and_config(config: BaseModel, save_dir: Path, model: nn.Module, e
         yaml.dump(config.model_dump(), f)
     logger.info("Saved config to %s", save_dir / "config.yaml")
 
-    model_file = save_dir / f"model_epoch_{epoch + 1}.pt"
+    model_file = save_dir / f"model_epoch_{epoch}.pt"
     torch.save(model.state_dict(), model_file)
     logger.info("Saved model to %s", model_file)
 
 
-# It may seem weird to redefine these, but:
+MODEL_CHECKPOINT_ARTIFACT_NAME = "model-checkpoint"
+CONFIG_FILE_NAME = "config.yaml"
+MODEL_FILE_NAME = "model.pt"
+
+
+def load_checkpoint_from_wandb[T: SaveableModule](
+    entity: str,
+    project: str,
+    run_id: str,
+    cc: type[T],
+) -> T:
+    api = wandb.Api()
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        run: FinishedRun = api.run(f"{entity}/{project}/{run_id}")
+        model_file: File = cast(File, run.file(MODEL_FILE_NAME))
+        cfg_file: File = cast(File, run.file(CONFIG_FILE_NAME))
+        model_file.download(root=temp_dir)
+        cfg_file.download(root=temp_dir)
+        with open(Path(temp_dir) / CONFIG_FILE_NAME) as f:
+            cfg_dict = yaml.safe_load(f)
+        model = cc.from_cfg(cfg_dict)
+        model.load_state_dict(torch.load(Path(temp_dir) / MODEL_FILE_NAME, weights_only=True))
+
+    return model
+
+
 # 1: this signature allows us to use these norms in einops.reduce
 # 2: I (oli) find `l2_norm(x, dim=-1)` more readable than `x.norm(p=2, dim=-1)`
 
@@ -175,9 +214,9 @@ def calculate_explained_variance_ML(
 def get_explained_var_dict(explained_variance_ML: torch.Tensor, layers_to_harvest: list[int]) -> dict[str, float]:
     num_models, _n_layers = explained_variance_ML.shape
     explained_variances_dict = {
-        f"train/explained_variance/M{model_idx}_L{layer_idx}": explained_variance_ML[model_idx, layer_idx].item()
+        f"train/explained_variance/M{model_idx}_L{layer_number}": explained_variance_ML[model_idx, layer_idx].item()
         for model_idx in range(num_models)
-        for layer_idx in layers_to_harvest
+        for layer_idx, layer_number in enumerate(layers_to_harvest)
     }
 
     return explained_variances_dict
