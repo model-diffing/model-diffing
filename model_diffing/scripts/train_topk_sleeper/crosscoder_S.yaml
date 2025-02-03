@@ -1,22 +1,21 @@
-seed: 42
 data:
   sequence_iterator:
-    classname: SleeperTokenSequenceIterator
+    batch_size: 16
+    classname: SleeperTokenSequenceLoader
     kwargs:
       include_sleeper_data: false
-  sequence_shuffle_buffer_size: 1024
+      sequence_length: 128
+      shuffle_buffer_size: 1024
   activations_harvester:
     layer_indices_to_harvest: [0, 1, 2, 3]
     harvest_batch_size: 16
+    llms:
+      - name: "roneneldan/TinyStories-Instruct-33M"
+        lora_name: "mars-jason-25/tiny-stories-33M-ft1"
   activations_shuffle_buffer_size: 1024
   cc_training_batch_size: 256
-llm:
-  base_model_repo: "roneneldan/TinyStories-Instruct-33M"
-  lora_model_repo: "mars-jason-25/tiny-stories-33M-ft1"
-wandb:
-  project: "sleeper-model-diffing"
-  entity: dmitry2-uiuc
-  name: "crosscoder_S"
+wandb: true
+experiment_name: "crosscoder_S"
 crosscoder:
   hidden_dim: 1536
   k: 20
@@ -26,9 +25,10 @@ train:
   optimizer:
     initial_learning_rate: 5e-5
     last_pct_of_steps: 0.25
-  num_epochs: 20
-  save_dir: './.checkpoints/crosscoder_S'
+  epochs: 20
+  base_save_dir: './.checkpoints'
   save_every_n_epochs: 1
   log_every_n_steps: 50
   num_test_batches: 10
   n_batches_for_norm_estimate: 100
+  upload_checkpoint_to_wandb_every_n_epochs: 1

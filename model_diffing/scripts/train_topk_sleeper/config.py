@@ -1,29 +1,27 @@
 from pathlib import Path
-from typing import Literal
 
-import yaml
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel
 
 from model_diffing.scripts.config_common import (
     AdamDecayTo0LearningRateConfig,
-    WandbConfig,
-    DataConfig,
+    BaseExperimentConfig,
 )
 
 class TrainConfig(BaseModel):
     optimizer: AdamDecayTo0LearningRateConfig
-    num_epochs: int
-    save_dir: Path | None
+    epochs: int
+    base_save_dir: str = ".checkpoints"
     save_every_n_epochs: int | None
     log_every_n_steps: int
     n_batches_for_norm_estimate: int = 100
     num_test_batches: int = 10
-    norm_scaling_factors: list[list[float]] | None = None
+    upload_checkpoint_to_wandb_every_n_epochs: int | None = None
 
-    @field_serializer("save_dir")
-    def serialize_save_dir(self, save_dir: Path, _info):
-        # Return yaml serialization of str(save_dir), correctly escaping special characters
-        return yaml.dump(str(save_dir)).split('\n')[0] # TODO hacky
+# TODO
+#    @field_serializer("save_dir")
+#    def serialize_save_dir(self, save_dir: Path, _info):
+#        # Return yaml serialization of str(save_dir), correctly escaping special characters
+#        return yaml.dump(str(save_dir)).split('\n')[0] # TODO hacky
 
 class TopKCrosscoderConfig(BaseModel):
     hidden_dim: int
@@ -32,21 +30,12 @@ class TopKCrosscoderConfig(BaseModel):
     ft_init_checkpt_folder: Path | None = None
     ft_init_checkpt_epoch: int | None = None
 
-    @field_serializer("ft_init_checkpt_folder")
-    def serialize_ft_init_checkpt_folder(self, ft_init_checkpt_folder: Path, _info):
-        return yaml.dump(str(ft_init_checkpt_folder)).split('\n')[0] # TODO hacky
+# TODO
+#     @field_serializer("ft_init_checkpt_folder")
+#     def serialize_ft_init_checkpt_folder(self, ft_init_checkpt_folder: Path, _info):
+#         return yaml.dump(str(ft_init_checkpt_folder)).split('\n')[0] # TODO hacky
 
 
-class LoraLLMConfig(BaseModel):
-    base_model_repo: str
-    lora_model_repo: str
-
-
-class TopKExperimentConfig(BaseModel):
-    seed: int
-    cache_dir: str = ".cache"
-    data: DataConfig
-    llm: LoraLLMConfig
-    wandb: WandbConfig | Literal["disabled"] = "disabled"
+class TopKExperimentConfig(BaseExperimentConfig):
     crosscoder: TopKCrosscoderConfig
     train: TrainConfig
