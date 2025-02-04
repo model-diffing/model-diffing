@@ -41,6 +41,6 @@ def test():
         n_batches_for_norm_estimate=1,
     )
 
-    sample_activations_batch = next(dataloader.get_shuffled_activations_iterator_BMLD())
+    sample_activations_batch = next(dataloader.get_shuffled_activations_iterator())
     harvested_activation_expected_shape_MLD = (training_batch_size, len(llms), len(layer_indices_to_harvest), d_model)
     assert sample_activations_batch.shape == harvested_activation_expected_shape_MLD

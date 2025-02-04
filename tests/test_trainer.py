@@ -39,7 +39,7 @@ class FakeActivationsDataloader(BaseActivationsDataloader):
         self._d_model = d_model
         self._num_batches = num_batches
 
-    def get_shuffled_activations_iterator_BMLD(self) -> Iterator[Tensor]:
+    def get_shuffled_activations_iterator(self) -> Iterator[Tensor]:
         for _ in range(self._num_batches):
             yield torch.randint(
                 0,
@@ -48,7 +48,7 @@ class FakeActivationsDataloader(BaseActivationsDataloader):
                 dtype=torch.float32,
             )
 
-    def batch_shape_BMLD(self) -> tuple[int, int, int, int]:
+    def batch_shape(self) -> tuple[int, int, int, int]:
         return (self._batch_size, self._n_layers, self._n_models, self._d_model)
 
     def num_batches(self) -> int | None:

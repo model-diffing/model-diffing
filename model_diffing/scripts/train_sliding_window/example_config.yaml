@@ -1,22 +1,24 @@
 data:
   sequence_iterator:
-    classname: CommonCorpusTokenSequenceLoader
+    classname: HuggingfaceTextDatasetTokenSequenceLoader
     kwargs:
-      sequence_length: 1024
+      # hf_dataset_name: "PleIAs/common_corpus"
+      hf_dataset_name: "monology/pile-uncopyrighted"
+      sequence_length: 256
       shuffle_buffer_size: 16_384
   activations_harvester:
     llms:
       - name: EleutherAI/pythia-160M
-        revision: step142000
-      - name: EleutherAI/pythia-160M
         revision: step143000 # last checkpoint
-    layer_indices_to_harvest: [2, 6, 7, 8]
-    harvesting_batch_size: 32
-  activations_shuffle_buffer_size: 131_072
+    layer_indices_to_harvest: [0, 1, 2]
+    harvesting_batch_size: 4
+  activations_shuffle_buffer_size: 8_192
 crosscoder:
-  hidden_dim: 32_768
+  hidden_dim: 4096
+  jumprelu:
+    backprop_through_jumprelu_input: true
 train:
-  batch_size: 16
+  batch_size: 128
   optimizer:
     warmup_pct: 0.05
     initial_learning_rate: 4e-4
@@ -28,8 +30,7 @@ train:
   c: 4.0
   final_lambda_s: 5.0
   lambda_p: 0.000003 # 3e-6
-  jumprelu:
-    backprop_through_jumprelu_input: true
 
-experiment_name: JumpReLU_SAE_pythia_160M_crossmodel_nlayers_32k
+token_window_size: 2
+experiment_name: sliding_window_test
 wandb: True

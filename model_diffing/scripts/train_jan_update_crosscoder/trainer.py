@@ -11,7 +11,7 @@ from model_diffing.models.activations.jumprelu import JumpReLUActivation
 from model_diffing.scripts.base_trainer import BaseTrainer
 from model_diffing.scripts.train_jan_update_crosscoder.config import JanUpdateTrainConfig
 from model_diffing.utils import (
-    calculate_explained_variance_ML,
+    calculate_explained_variance_TML,
     calculate_reconstruction_loss,
     get_decoder_norms_H,
     get_explained_var_dict,
@@ -20,16 +20,16 @@ from model_diffing.utils import (
 
 
 class JanUpdateCrosscoderTrainer(BaseTrainer[JanUpdateTrainConfig, JumpReLUActivation]):
-    def _train_step(self, batch_BMLD: t.Tensor) -> dict[str, float]:
+    def _train_step(self, batch_BX: t.Tensor) -> dict[str, float]:
         self.optimizer.zero_grad()
 
         # fwd
-        train_res = self.crosscoder.forward_train(batch_BMLD)
+        train_res = self.crosscoder.forward_train(batch_BX)
 
         # losses
-        reconstruction_loss = calculate_reconstruction_loss(batch_BMLD, train_res.reconstructed_acts_BMLD)
+        reconstruction_loss = calculate_reconstruction_loss(batch_BX, train_res.reconstructed_acts_BTMLD)
 
-        decoder_norms_H = get_decoder_norms_H(self.crosscoder.W_dec_HMLD)
+        decoder_norms_H = get_decoder_norms_H(self.crosscoder.W_dec_HTMLD)
         tanh_sparsity_loss = self._tanh_sparsity_loss(train_res.hidden_BH, decoder_norms_H)
         pre_act_loss = self._pre_act_loss(train_res.hidden_BH, decoder_norms_H)
 
@@ -53,7 +53,7 @@ class JanUpdateCrosscoderTrainer(BaseTrainer[JanUpdateTrainConfig, JumpReLUActiv
 
         # metrics
         mean_l0 = l0_norm(train_res.hidden_BH, dim=-1).mean()
-        explained_variance_ML = calculate_explained_variance_ML(batch_BMLD, train_res.reconstructed_acts_BMLD)
+        explained_variance_TML = calculate_explained_variance_TML(batch_BX, train_res.reconstructed_acts_BTMLD)
 
         thresholds_H = self.crosscoder.hidden_activation.log_threshold_H.exp().detach().cpu().numpy().tolist()
         thresholds_hist = wandb.Histogram(sequence=thresholds_H, num_bins=100)
@@ -74,7 +74,7 @@ class JanUpdateCrosscoderTrainer(BaseTrainer[JanUpdateTrainConfig, JumpReLUActiv
             #
             "train/loss": loss.item(),
             #
-            **get_explained_var_dict(explained_variance_ML, self.layers_to_harvest),
+            **get_explained_var_dict(explained_variance_TML, self.layers_to_harvest),
             #
             "media/jumprelu_threshold_distribution": thresholds_hist,
         }

@@ -15,7 +15,7 @@ def build_trainer(cfg: TopKExperimentConfig) -> TopKTrainer:
     device = get_device()
 
     dataloader = build_dataloader(cfg.data, cfg.train.batch_size, cfg.cache_dir, device)
-    _, n_layers, n_models, d_model = dataloader.batch_shape_BMLD()
+    _, n_layers, n_models, d_model = dataloader.batch_shape()
 
     crosscoder = AcausalCrosscoder(
         n_models=n_models,

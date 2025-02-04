@@ -33,6 +33,7 @@ def save_model(model: SaveableModule, save_dir: Path, epoch: int, step: int) -> 
 # using python3.11 generics because it's better supported by GPU providers
 TConfig = TypeVar("TConfig", bound=BaseTrainConfig)
 TAct = TypeVar("TAct", bound=SaveableModule)
+# TDataLoader = TypeVar("TDataLoader", bound=BaseActivationsDataloader)
 
 
 class BaseTrainer(Generic[TConfig, TAct]):
@@ -76,13 +77,13 @@ class BaseTrainer(Generic[TConfig, TAct]):
     def train(self):
         save_config(self.cfg, self.save_dir)
         for _ in range(self.cfg.epochs or 1):
-            epoch_dataloader = self.activations_dataloader.get_shuffled_activations_iterator_BMLD()
+            epoch_dataloader = self.activations_dataloader.get_shuffled_activations_iterator()
             epoch_dataloader = islice(epoch_dataloader, self.num_steps_per_epoch)
 
-            for example_BMLD in epoch_dataloader:
-                batch_BMLD = example_BMLD.to(self.device)
+            for example_BX in epoch_dataloader:
+                batch_BX = example_BX.to(self.device)
 
-                train_result_dict = self._train_step(batch_BMLD)
+                train_result_dict = self._train_step(batch_BX)
 
                 if (
                     self.wandb_run is not None
@@ -96,9 +97,9 @@ class BaseTrainer(Generic[TConfig, TAct]):
                         "train/learning_rate": self.optimizer.param_groups[0]["lr"],
                     }
 
-                    if self.crosscoder.n_models == 2:
+                    if self.crosscoder.n_models == 2 and self.crosscoder.n_tokens == 1:
                         hist_data = create_cosine_sim_and_relative_norm_histogram_data(
-                            self.crosscoder.W_dec_HMLD.detach().cpu(), self.layers_to_harvest
+                            self.crosscoder.W_dec_HTMLD.detach().cpu(), self.layers_to_harvest
                         )
                         log_dict.update(
                             {
@@ -118,13 +119,13 @@ class BaseTrainer(Generic[TConfig, TAct]):
                         save_model(self.crosscoder, self.save_dir, self.epoch, self.step)
 
                 if self.epoch == 0:
-                    self.unique_tokens_trained += batch_BMLD.shape[0]
+                    self.unique_tokens_trained += batch_BX.shape[0]
 
                 self.step += 1
             self.epoch += 1
 
     @abstractmethod
-    def _train_step(self, batch_BMLD: torch.Tensor) -> dict[str, float]: ...
+    def _train_step(self, batch_BX: torch.Tensor) -> dict[str, float]: ...
 
 
 def validate_num_steps_per_epoch(
@@ -171,6 +172,7 @@ TTrainer = TypeVar("TTrainer", bound=BaseTrainer[Any, Any])
 
 def run_exp(build_trainer: Callable[[TCfg], TTrainer], cfg_cls: type[TCfg]) -> Callable[[Path], None]:
     def inner(config_path: Path) -> None:
+        config_path = Path(config_path)
         assert config_path.suffix == ".yaml", f"Config file {config_path} must be a YAML file."
         assert Path(config_path).exists(), f"Config file {config_path} does not exist."
         logger.info("Loading config...")

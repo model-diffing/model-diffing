@@ -8,19 +8,21 @@ from model_diffing.analysis import metrics
 
 
 def create_cosine_sim_and_relative_norm_histogram_data(
-    W_dec_HMLD: torch.Tensor,
+    W_dec_HTMLD: torch.Tensor,
     layers: list[int],
 ) -> dict[str, list[float]]:
-    if W_dec_HMLD.shape[1] != 2:
-        raise ValueError(f"W_dec_HMLD.shape[1] != 2. shape: {W_dec_HMLD.shape}")
+    if W_dec_HTMLD.shape[1] != 1:
+        raise ValueError("only works for single token")
+    if W_dec_HTMLD.shape[2] != 2:
+        raise ValueError(f"W_dec_HTMLD.shape[1] != 2. shape: {W_dec_HTMLD.shape}")
 
-    _, _, num_layers, _ = W_dec_HMLD.shape
+    _, _, num_layers, _ = W_dec_HTMLD.shape
 
     plots = {}
     for layer_idx in range(num_layers):
         layer_name = layers[layer_idx]  # layer_idx is the index into the list of layers we're collecting
-        W_dec_a_HD = W_dec_HMLD[:, 0, layer_idx]
-        W_dec_b_HD = W_dec_HMLD[:, 1, layer_idx]
+        W_dec_a_HD = W_dec_HTMLD[:, 0, layer_idx]
+        W_dec_b_HD = W_dec_HTMLD[:, 1, layer_idx]
 
         relative_norms = metrics.compute_relative_norms_N(W_dec_a_HD, W_dec_b_HD)
         plots[f"relative_decoder_norms_layer_{layer_name}"] = relative_norms.detach().cpu().numpy().tolist()

@@ -112,7 +112,7 @@ sparsity_loss_l1_of_norms = partial(
 )
 
 
-def calculate_reconstruction_loss(activation_BMLD: torch.Tensor, target_BMLD: torch.Tensor) -> torch.Tensor:
+def calculate_reconstruction_loss(activation_BTMLD: torch.Tensor, target_BTMLD: torch.Tensor) -> torch.Tensor:
     """This is a little weird because we have both model and layer dimensions, so it's worth explaining deeply:
 
     The reconstruction loss is a sum of squared L2 norms of the error for each activation space being reconstructed.
@@ -124,10 +124,10 @@ def calculate_reconstruction_loss(activation_BMLD: torch.Tensor, target_BMLD: to
 
     $$ \\sum_{m \\in M} \\sum_{l \\in L} \\|a_m^l(x_j) - a_m^{l'}(x_j)\\|^2 $$
     """
-    error_BMLD = activation_BMLD - target_BMLD
-    error_norm_BML = reduce(error_BMLD, "batch model layer d_model -> batch model layer", l2_norm)
-    squared_error_norm_BML = error_norm_BML.square()
-    summed_squared_error_norm_B = reduce(squared_error_norm_BML, "batch model layer -> batch", torch.sum)
+    error_BTMLD = activation_BTMLD - target_BTMLD
+    error_norm_BTML = reduce(error_BTMLD, "batch token model layer d_model -> batch token model layer", l2_norm)
+    squared_error_norm_BTML = error_norm_BTML.square()
+    summed_squared_error_norm_B = reduce(squared_error_norm_BTML, "batch token model layer -> batch", torch.sum)
     return summed_squared_error_norm_B.mean()
 
 
@@ -153,25 +153,28 @@ def multi_reduce(
     return tensor
 
 
-def calculate_explained_variance_ML(
-    activations_BMLD: torch.Tensor,
-    reconstructed_BMLD: torch.Tensor,
+def calculate_explained_variance_TML(
+    activations_BTMLD: torch.Tensor,
+    reconstructed_BTMLD: torch.Tensor,
     eps: float = 1e-8,
 ) -> torch.Tensor:
     """for each model and layer, calculate the mean explained variance inside each d_model feature space"""
-    error_BMLD = activations_BMLD - reconstructed_BMLD
+    error_BTMLD = activations_BTMLD - reconstructed_BTMLD
 
-    mean_error_var_ML = error_BMLD.var(-1).mean(0)
-    mean_activations_var_ML = activations_BMLD.var(-1).mean(0)
+    mean_error_var_TML = error_BTMLD.var(-1).mean(0)
+    mean_activations_var_TML = activations_BTMLD.var(-1).mean(0)
 
-    explained_var_ML = 1 - (mean_error_var_ML / (mean_activations_var_ML + eps))
-    return explained_var_ML
+    explained_var_TML = 1 - (mean_error_var_TML / (mean_activations_var_TML + eps))
+    return explained_var_TML
 
 
-def get_explained_var_dict(explained_variance_ML: torch.Tensor, layers_to_harvest: list[int]) -> dict[str, float]:
-    num_models, _n_layers = explained_variance_ML.shape
+def get_explained_var_dict(explained_variance_TML: torch.Tensor, layers_to_harvest: list[int]) -> dict[str, float]:
+    num_tokens, num_models, _n_layers = explained_variance_TML.shape
     explained_variances_dict = {
-        f"train/explained_variance_M{model_idx}_L{layer_number}": explained_variance_ML[model_idx, layer_idx].item()
+        f"train/explained_variance_T{token_idx}_M{model_idx}_L{layer_number}": explained_variance_TML[
+            token_idx, model_idx, layer_idx
+        ].item()
+        for token_idx in range(num_tokens)
         for model_idx in range(num_models)
         for layer_idx, layer_number in enumerate(layers_to_harvest)
     }
@@ -179,9 +182,9 @@ def get_explained_var_dict(explained_variance_ML: torch.Tensor, layers_to_harves
     return explained_variances_dict
 
 
-def get_decoder_norms_H(W_dec_HMLD: torch.Tensor) -> torch.Tensor:
-    W_dec_l2_norms_HML = reduce(W_dec_HMLD, "hidden model layer dim -> hidden model layer", l2_norm)
-    norms_H = reduce(W_dec_l2_norms_HML, "hidden model layer -> hidden", torch.sum)
+def get_decoder_norms_H(W_dec_HTMLD: torch.Tensor) -> torch.Tensor:
+    W_dec_l2_norms_HTML = reduce(W_dec_HTMLD, "hidden token model layer dim -> hidden token model layer", l2_norm)
+    norms_H = reduce(W_dec_l2_norms_HTML, "hidden token model layer -> hidden", torch.sum)
     return norms_H
 
 

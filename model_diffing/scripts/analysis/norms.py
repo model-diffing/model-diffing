@@ -53,11 +53,11 @@ llms = build_llms(llm_configs, cache_dir, device, dtype=activations_harvester_co
 dataloader = build_dataloader(data_config, 16, cache_dir, device)
 
 # %%
-sample_BMLD = next(dataloader.get_shuffled_activations_iterator_BMLD())
+sample_BMLD = next(dataloader.get_shuffled_activations_iterator())
 print(sample_BMLD.shape, sample_BMLD.device)
 
 # %%
-norms_NML = collect_norms(dataloader.get_shuffled_activations_iterator_BMLD(), device=device, n_batches=512)
+norms_NML = collect_norms(dataloader.get_shuffled_activations_iterator(), device=device, n_batches=512)
 print(norms_NML.shape, norms_NML.device)
 
 # %%
