@@ -5,47 +5,48 @@ import torch
 from plotly.subplots import make_subplots
 
 from model_diffing.analysis import metrics
-from model_diffing.log import logger
 
 
-def create_visualizations(W_dec_HMLD: torch.Tensor, layers: list[int]) -> dict[str, go.Figure] | None:
-    _, num_models, num_layers, _ = W_dec_HMLD.shape
-    if num_models != 2:
-        logger.warning(f"num_models != 2, skipping visualizations. num_models: {num_models}")
-        return None
+def create_cosine_sim_and_relative_norm_histogram_data(
+    W_dec_HMLD: torch.Tensor,
+    layers: list[int],
+) -> dict[str, list[float]]:
+    if W_dec_HMLD.shape[1] != 2:
+        raise ValueError(f"W_dec_HMLD.shape[1] != 2. shape: {W_dec_HMLD.shape}")
+
+    _, _, num_layers, _ = W_dec_HMLD.shape
 
     plots = {}
-
     for layer_idx in range(num_layers):
         layer_name = layers[layer_idx]  # layer_idx is the index into the list of layers we're collecting
-        a_HD = W_dec_HMLD[:, 0, layer_idx]
-        b_HD = W_dec_HMLD[:, 1, layer_idx]
+        W_dec_a_HD = W_dec_HMLD[:, 0, layer_idx]
+        W_dec_b_HD = W_dec_HMLD[:, 1, layer_idx]
 
-        relative_norms_fig = plot_relative_norms(a_HD, b_HD, title=f"Relative Norms. Layer {layer_name}")
-        plots[f"relative_decoder_norms_layer_{layer_name}"] = relative_norms_fig
+        relative_norms = metrics.compute_relative_norms_N(W_dec_a_HD, W_dec_b_HD)
+        plots[f"relative_decoder_norms_layer_{layer_name}"] = relative_norms.detach().cpu().numpy().tolist()
 
-        cosine_sim_fig = plot_cosine_sim(
-            metrics.compute_cosine_similarities_N(a_HD, b_HD), title=f"Cosine Similarity. Layer {layer_name}"
-        )
-        plots[f"cosine_sim_layer_{layer_name}"] = cosine_sim_fig
+        shared_latent_mask = metrics.get_shared_latent_mask(relative_norms)
+        cosine_sims = metrics.compute_cosine_similarities_N(W_dec_a_HD, W_dec_b_HD)
+        shared_features_cosine_sims = cosine_sims[shared_latent_mask]
+        plots[f"cosine_sim_layer_{layer_name}"] = shared_features_cosine_sims.detach().cpu().numpy().tolist()
 
     return plots
 
 
-def plot_relative_norms(vectors_a: torch.Tensor, vectors_b: torch.Tensor, title: str | None = None) -> go.Figure:
+def plot_relative_norms(vectors_a_NF: torch.Tensor, vectors_b_NF: torch.Tensor, title: str | None = None) -> go.Figure:
     """Plot histogram of relative norms (norm_b / (norm_a + norm_b)).
 
     Args:
-        vectors_a: Tensor of vectors from the first set
-        vectors_b: Tensor of vectors from the second set
+        vectors_a_NF: Tensor of vectors from the first set
+        vectors_b_NF: Tensor of vectors from the second set
         title: Optional title for the plot
 
     Returns:
         Plotly figure object
     """
-    relative_norms = metrics.compute_relative_norms_N(vectors_a, vectors_b)
+    relative_norms_N = metrics.compute_relative_norms_N(vectors_a_NF, vectors_b_NF)
 
-    return relative_norms_hist(relative_norms, title=title)
+    return relative_norms_hist(relative_norms_N, title=title)
 
 
 def relative_norms_hist(relative_norms_N: torch.Tensor, title: str | None = None) -> go.Figure:

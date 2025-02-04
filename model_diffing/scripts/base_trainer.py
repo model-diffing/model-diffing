@@ -1,31 +1,41 @@
 from abc import abstractmethod
+from collections.abc import Callable
 from itertools import islice
 from pathlib import Path
+from typing import Any, Generic, TypeVar
 
 import torch
 import wandb
+import yaml
 from wandb.sdk.wandb_run import Run
 
-from model_diffing.analysis.visualization import create_visualizations
+from model_diffing.analysis.visualization import create_cosine_sim_and_relative_norm_histogram_data
 from model_diffing.dataloader.activations import BaseActivationsDataloader
 from model_diffing.log import logger
 from model_diffing.models.crosscoder import AcausalCrosscoder
-from model_diffing.scripts.config_common import BaseTrainConfig
+from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainConfig
 from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer
-from model_diffing.utils import CONFIG_FILE_NAME, MODEL_FILE_NAME, SaveableModule, save_model_and_config
+from model_diffing.utils import SaveableModule
 
 
-class BaseTrainer[TConfig: BaseTrainConfig, TAct: SaveableModule]:
-    tep: int
-    epoch: int
-    unique_tokens_trained: int
+def save_config(config: BaseTrainConfig, save_dir: Path) -> None:
+    save_dir.mkdir(parents=True, exist_ok=True)
+    with open(save_dir / "config.yaml", "w") as f:
+        yaml.dump(config, f)
+    logger.info("Saved config to %s", save_dir / "config.yaml")
 
-    # I've tried to make this invariant as obvious as possible in this type signature:
-    # If training without epochs (epochs=1), we need to provide num_steps
-    # However, if training with epochs, we don't need to limit the number of steps per epoch,
-    # just loop through the dataloader
-    # epochs_steps: tuple[Literal[1], int] | tuple[int, None]
 
+def save_model(model: SaveableModule, save_dir: Path, epoch: int, step: int) -> None:
+    save_dir.mkdir(parents=True, exist_ok=True)
+    model.save(save_dir / f"epoch_{epoch}_step_{step}")
+
+
+# using python3.11 generics because it's better supported by GPU providers
+TConfig = TypeVar("TConfig", bound=BaseTrainConfig)
+TAct = TypeVar("TAct", bound=SaveableModule)
+
+
+class BaseTrainer(Generic[TConfig, TAct]):
     def __init__(
         self,
         cfg: TConfig,
@@ -37,10 +47,13 @@ class BaseTrainer[TConfig: BaseTrainConfig, TAct: SaveableModule]:
         experiment_name: str,
     ):
         self.cfg = cfg
+        self.activations_dataloader = activations_dataloader
         self.crosscoder = crosscoder
-        self.optimizer = build_optimizer(cfg.optimizer, crosscoder.parameters())
+        self.wandb_run = wandb_run
+        self.device = device
+        self.layers_to_harvest = layers_to_harvest
 
-        self.epochs = cfg.epochs
+        self.optimizer = build_optimizer(cfg.optimizer, crosscoder.parameters())
 
         self.num_steps_per_epoch = validate_num_steps_per_epoch(
             cfg.epochs, cfg.num_steps_per_epoch, cfg.num_steps, activations_dataloader
@@ -53,90 +66,56 @@ class BaseTrainer[TConfig: BaseTrainConfig, TAct: SaveableModule]:
 
         self.lr_scheduler = build_lr_scheduler(cfg.optimizer, self.num_steps_per_epoch)
 
-        self.activations_dataloader = activations_dataloader
-        self.wandb_run = wandb_run
-        self.device = device
-        self.layers_to_harvest = layers_to_harvest
-
-        self.base_save_dir = Path(cfg.base_save_dir) / experiment_name
-
-        self.local_save_dir = self.base_save_dir / "local_checkpoints"
-        self.local_save_dir.mkdir(parents=True, exist_ok=True)
-
-        self.wandb_checkpoint_dir = self.base_save_dir / "wandb_checkpoints"
-        self.wandb_checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self.save_dir = Path(cfg.base_save_dir) / experiment_name
+        self.save_dir.mkdir(parents=True, exist_ok=True)
 
         self.step = 0
         self.epoch = 0
         self.unique_tokens_trained = 0
 
     def train(self):
-        if self.wandb_run:
-            self.wandb_run.save(
-                f"{self.wandb_checkpoint_dir}/*",
-                base_path=self.base_save_dir,
-                policy="end",
-            )
-
-        for _ in range(self.epochs or 1):
-            epoch_dataloader = islice(
-                self.activations_dataloader.get_shuffled_activations_iterator_BMLD(),
-                self.num_steps_per_epoch,
-            )
+        save_config(self.cfg, self.save_dir)
+        for _ in range(self.cfg.epochs or 1):
+            epoch_dataloader = self.activations_dataloader.get_shuffled_activations_iterator_BMLD()
+            epoch_dataloader = islice(epoch_dataloader, self.num_steps_per_epoch)
 
             for example_BMLD in epoch_dataloader:
                 batch_BMLD = example_BMLD.to(self.device)
 
-                log_dict = {
-                    **self._train_step(batch_BMLD),
-                    "train/step": self.step,
-                    "train/epoch": self.epoch,
-                    "train/unique_tokens_trained": self.unique_tokens_trained,
-                }
+                train_result_dict = self._train_step(batch_BMLD)
 
-                if self.wandb_run:
-                    if self.cfg.log_every_n_steps is not None and self.step % self.cfg.log_every_n_steps == 0:
-                        self.wandb_run.log(log_dict, step=self.step)
+                if (
+                    self.wandb_run is not None
+                    and self.cfg.log_every_n_steps is not None
+                    and self.step % self.cfg.log_every_n_steps == 0
+                ):
+                    log_dict: dict[str, Any] = {
+                        **train_result_dict,
+                        "train/epoch": self.epoch,
+                        "train/unique_tokens_trained": self.unique_tokens_trained,
+                        "train/learning_rate": self.optimizer.param_groups[0]["lr"],
+                    }
 
-                    if (
-                        self.cfg.log_visualizations_every_n_steps is not None
-                        and self.step % self.cfg.log_visualizations_every_n_steps == 0
-                    ):
-                        visualizations = create_visualizations(
+                    if self.crosscoder.n_models == 2:
+                        hist_data = create_cosine_sim_and_relative_norm_histogram_data(
                             self.crosscoder.W_dec_HMLD.detach().cpu(), self.layers_to_harvest
                         )
-                        if visualizations is not None:
-                            self.wandb_run.log(
-                                {f"visualizations/{k}": wandb.Plotly(v) for k, v in visualizations.items()},
-                                step=self.step,
-                            )
+                        log_dict.update(
+                            {
+                                f"media/{name}": wandb.Histogram(sequence=data, num_bins=100)
+                                for name, data in hist_data.items()
+                            }
+                        )
 
-                    # if (
-                    #     self.cfg.upload_checkpoint_to_wandb_every_n_steps is not None
-                    #     and self.step % self.cfg.upload_checkpoint_to_wandb_every_n_steps == 0
-                    # ):
-                    #     with self.crosscoder.temporarily_fold_activation_scaling(norm_scaling_factors_ML):
-                    #         cfg_dict = self.crosscoder.dump_cfg()
-                    #         state_dict = self.crosscoder.state_dict()
+                    self.wandb_run.log(log_dict, step=self.step)
 
-                    #         cfg_path = self.wandb_checkpoint_dir / CONFIG_FILE_NAME
-                    #         model_path = self.wandb_checkpoint_dir / MODEL_FILE_NAME
-
-                    #         with open(cfg_path, "w") as f:
-                    #             yaml.dump(cfg_dict, f)
-
-                    #         torch.save(state_dict, model_path)
+                # TODO(oli): get wandb checkpoint saving working
 
                 if self.cfg.save_every_n_steps is not None and self.step % self.cfg.save_every_n_steps == 0:
                     with self.crosscoder.temporarily_fold_activation_scaling(
                         self.activations_dataloader.get_norm_scaling_factors_ML()
                     ):
-                        save_model_and_config(
-                            config=self.cfg,
-                            save_dir=self.local_save_dir,
-                            model=self.crosscoder,
-                            step=self.step,
-                        )
+                        save_model(self.crosscoder, self.save_dir, self.epoch, self.step)
 
                 if self.epoch == 0:
                     self.unique_tokens_trained += batch_BMLD.shape[0]
@@ -184,3 +163,24 @@ def validate_num_steps_per_epoch(
     if num_steps_per_epoch is not None:
         raise ValueError("num_steps_per_epoch must not be provided if not using epochs")
     return num_steps
+
+
+TCfg = TypeVar("TCfg", bound=BaseExperimentConfig)
+TTrainer = TypeVar("TTrainer", bound=BaseTrainer[Any, Any])
+
+
+def run_exp(build_trainer: Callable[[TCfg], TTrainer], cfg_cls: type[TCfg]) -> Callable[[Path], None]:
+    def inner(config_path: Path) -> None:
+        assert config_path.suffix == ".yaml", f"Config file {config_path} must be a YAML file."
+        assert Path(config_path).exists(), f"Config file {config_path} does not exist."
+        logger.info("Loading config...")
+        with open(config_path) as f:
+            config_dict = yaml.safe_load(f)
+        config = cfg_cls(**config_dict)
+        logger.info("Loaded config")
+        logger.info("Building trainer")
+        trainer = build_trainer(config)
+        logger.info("Training")
+        trainer.train()
+
+    return inner

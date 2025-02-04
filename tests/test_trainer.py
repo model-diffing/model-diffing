@@ -6,7 +6,8 @@ import torch
 from torch import Tensor
 
 from model_diffing.dataloader.activations import BaseActivationsDataloader
-from model_diffing.models.crosscoder import build_relu_crosscoder
+from model_diffing.models.activations.relu import ReLUActivation
+from model_diffing.models.crosscoder import AcausalCrosscoder
 from model_diffing.scripts.base_trainer import BaseTrainer, validate_num_steps_per_epoch
 from model_diffing.scripts.config_common import AdamDecayTo0LearningRateConfig, BaseTrainConfig
 from model_diffing.utils import get_device
@@ -64,9 +65,9 @@ def opt():
 @pytest.mark.parametrize(
     "train_cfg",
     [
-        BaseTrainConfig(epochs=2, optimizer=opt()),
-        BaseTrainConfig(epochs=2, num_steps_per_epoch=10, optimizer=opt()),
-        BaseTrainConfig(num_steps=10, optimizer=opt()),
+        BaseTrainConfig(batch_size=1, epochs=2, optimizer=opt()),
+        BaseTrainConfig(batch_size=1, epochs=2, num_steps_per_epoch=10, optimizer=opt()),
+        BaseTrainConfig(batch_size=1, num_steps=10, optimizer=opt()),
     ],
 )
 def test_trainer_epochs_steps(train_cfg: BaseTrainConfig) -> None:
@@ -85,12 +86,13 @@ def test_trainer_epochs_steps(train_cfg: BaseTrainConfig) -> None:
         num_batches=num_batches,
     )
 
-    crosscoder = build_relu_crosscoder(
+    crosscoder = AcausalCrosscoder(
         n_models=n_models,
         n_layers=n_layers,
         d_model=d_model,
-        cc_hidden_dim=16,
+        hidden_dim=16,
         dec_init_norm=0.0,
+        hidden_activation=ReLUActivation(),
     )
 
     trainer = TestTrainer(

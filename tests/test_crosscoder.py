@@ -1,6 +1,8 @@
 import torch as t
 
-from model_diffing.models.crosscoder import BatchTopkActivation, build_relu_crosscoder
+from model_diffing.models.activations.relu import ReLUActivation
+from model_diffing.models.activations.topk import BatchTopkActivation
+from model_diffing.models.crosscoder import AcausalCrosscoder
 
 
 def test_return_shapes():
@@ -11,12 +13,13 @@ def test_return_shapes():
     cc_hidden_dim = 256
     dec_init_norm = 1
 
-    crosscoder = build_relu_crosscoder(
+    crosscoder = AcausalCrosscoder(
         n_models=n_models,
         n_layers=n_layers,
         d_model=d_model,
-        cc_hidden_dim=cc_hidden_dim,
+        hidden_dim=cc_hidden_dim,
         dec_init_norm=dec_init_norm,
+        hidden_activation=ReLUActivation(),
     )
 
     activations_BMLD = t.randn(batch_size, n_models, n_layers, d_model)
@@ -43,7 +46,14 @@ def test_weights_folding_keeps_hidden_representations_consistent():
     cc_hidden_dim = 16
     dec_init_norm = 1
 
-    crosscoder = build_relu_crosscoder(n_models, n_layers, d_model, cc_hidden_dim, dec_init_norm)
+    crosscoder = AcausalCrosscoder(
+        n_models=n_models,
+        n_layers=n_layers,
+        d_model=d_model,
+        hidden_dim=cc_hidden_dim,
+        dec_init_norm=dec_init_norm,
+        hidden_activation=ReLUActivation(),
+    )
 
     scaling_factors_ML = t.randn(n_models, n_layers)
 
@@ -74,7 +84,14 @@ def test_weights_folding_scales_output_correctly():
     cc_hidden_dim = 6
     dec_init_norm = 0.1
 
-    crosscoder = build_relu_crosscoder(n_models, n_layers, d_model, cc_hidden_dim, dec_init_norm)
+    crosscoder = AcausalCrosscoder(
+        n_models=n_models,
+        n_layers=n_layers,
+        d_model=d_model,
+        hidden_dim=cc_hidden_dim,
+        dec_init_norm=dec_init_norm,
+        hidden_activation=ReLUActivation(),
+    )
 
     scaling_factors_ML = t.randn(n_models, n_layers)
 
@@ -101,7 +118,14 @@ def test_weights_rescaling():
     cc_hidden_dim = 32
     dec_init_norm = 0.1
 
-    crosscoder = build_relu_crosscoder(n_models, n_layers, d_model, cc_hidden_dim, dec_init_norm)
+    crosscoder = AcausalCrosscoder(
+        n_models=n_models,
+        n_layers=n_layers,
+        d_model=d_model,
+        hidden_dim=cc_hidden_dim,
+        dec_init_norm=dec_init_norm,
+        hidden_activation=ReLUActivation(),
+    )
 
     activations_BMLD = t.randn(batch_size, n_models, n_layers, d_model)
     output_BMLD = crosscoder.forward_train(activations_BMLD)
@@ -125,7 +149,14 @@ def test_weights_rescaling_makes_unit_norm_decoder_output():
     cc_hidden_dim = 32
     dec_init_norm = 0.1
 
-    crosscoder = build_relu_crosscoder(n_models, n_layers, d_model, cc_hidden_dim, dec_init_norm)
+    crosscoder = AcausalCrosscoder(
+        n_models=n_models,
+        n_layers=n_layers,
+        d_model=d_model,
+        hidden_dim=cc_hidden_dim,
+        dec_init_norm=dec_init_norm,
+        hidden_activation=ReLUActivation(),
+    )
 
     activations_BMLD = t.randn(batch_size, n_models, n_layers, d_model)
     output_BMLD = crosscoder.forward_train(activations_BMLD)

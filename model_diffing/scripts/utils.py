@@ -2,11 +2,22 @@ from collections.abc import Callable, Iterator
 from itertools import islice
 
 import torch
+import wandb
 from einops import reduce
 from tqdm import tqdm  # type: ignore
+from wandb.sdk.wandb_run import Run
 
-from model_diffing.scripts.config_common import AdamDecayTo0LearningRateConfig
+from model_diffing.scripts.config_common import AdamDecayTo0LearningRateConfig, BaseExperimentConfig
 from model_diffing.utils import l2_norm, multi_reduce
+
+
+def build_wandb_run(config: BaseExperimentConfig) -> Run | None:
+    return wandb.init(
+        name=config.experiment_name,
+        project="model-diffing",
+        entity="mars-model-diffing",
+        config=config.model_dump(),
+    )
 
 
 def build_optimizer(cfg: AdamDecayTo0LearningRateConfig, params: Iterator[torch.nn.Parameter]) -> torch.optim.Optimizer:
@@ -17,14 +28,17 @@ def build_optimizer(cfg: AdamDecayTo0LearningRateConfig, params: Iterator[torch.
 
 def build_lr_scheduler(cfg: AdamDecayTo0LearningRateConfig, num_steps: int) -> Callable[[int], float]:
     def _lr_scheduler(step: int) -> float:
+        if step < cfg.warmup_pct * num_steps:
+            return cfg.initial_learning_rate * (step / (cfg.warmup_pct * num_steps))
+
         pct_until_finished = 1 - (step / num_steps)
         if pct_until_finished < cfg.last_pct_of_steps:
             # 1 at the last step of constant learning rate period
             # 0 at the end of training
             scale = pct_until_finished / cfg.last_pct_of_steps
             return cfg.initial_learning_rate * scale
-        else:
-            return cfg.initial_learning_rate
+
+        return cfg.initial_learning_rate
 
     return _lr_scheduler
 

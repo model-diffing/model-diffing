@@ -22,22 +22,25 @@ llm_configs = [
 ]
 
 sequence_iterator_config = config_common.SequenceIteratorConfig(
-    classname="CommonCorpusTokenSequenceIterator",
-    kwargs={"sequence_length": 258},
-    batch_size=16,
+    classname="HuggingfaceTextDatasetTokenSequenceLoader",
+    kwargs={
+        "hf_dataset_name": "monology/pile-uncopyrighted",
+        "sequence_length": 258,
+        "shuffle_buffer_size": 4096,
+    },
 )
 
 activations_harvester_config = config_common.ActivationsHarvesterConfig(
     llms=llm_configs,
     layer_indices_to_harvest=[0, 3, 7, 9, 11],
     inference_dtype="float32",
+    harvesting_batch_size=16,
 )
 
 data_config = config_common.DataConfig(
     sequence_iterator=sequence_iterator_config,
     activations_harvester=activations_harvester_config,
     activations_shuffle_buffer_size=1000,
-    cc_training_batch_size=16,
 )
 
 cache_dir = "./.cache/norms"
@@ -47,7 +50,7 @@ device = get_device()
 llms = build_llms(llm_configs, cache_dir, device, dtype=activations_harvester_config.inference_dtype)
 
 # %%
-dataloader = build_dataloader(data_config, cache_dir, device)
+dataloader = build_dataloader(data_config, 16, cache_dir, device)
 
 # %%
 sample_BMLD = next(dataloader.get_shuffled_activations_iterator_BMLD())

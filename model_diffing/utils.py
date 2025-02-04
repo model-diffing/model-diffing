@@ -5,115 +5,39 @@ from typing import Any
 
 import einops
 import torch
-import wandb
 import yaml  # type: ignore
 from einops import reduce
 from einops.einops import Reduction
+from pydantic import BaseModel as _BaseModel
 from torch import nn
-from wandb.sdk.wandb_run import Run
 
-from model_diffing.log import logger
-from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainConfig
+
+class BaseModel(_BaseModel):
+    class Config:
+        extra = "forbid"
 
 
 class SaveableModule(nn.Module, ABC):
     @abstractmethod
-    def dump_cfg(self) -> dict[str, Any]: ...
+    def _dump_cfg(self) -> dict[str, Any]: ...
 
     @classmethod
     @abstractmethod
-    def from_cfg(cls, cfg: dict[str, Any]) -> "SaveableModule": ...
+    def _from_cfg(cls, cfg: dict[str, Any]) -> "SaveableModule": ...
 
+    def save(self, basepath: Path):
+        basepath.mkdir(parents=True, exist_ok=True)
+        torch.save(self.state_dict(), basepath / "model.pt")
+        with open(basepath / "model.cfg", "w") as f:
+            yaml.dump(self._dump_cfg(), f)
 
-def build_wandb_run(config: BaseExperimentConfig) -> Run | None:
-    return wandb.init(
-        name=config.experiment_name,
-        project="model-diffing",
-        entity="mars-model-diffing",
-        config=config.model_dump(),
-    )
-
-
-def save_model_and_config(config: BaseTrainConfig, save_dir: Path, model: nn.Module, step: int) -> None:
-    """Save the model to disk. Also save the config file if it doesn't exist.
-
-    Args:
-        config: The config object. Saved if save_dir / "config.yaml" doesn't already exist.
-        save_dir: The directory to save the model and config to.
-        model: The model to save.
-        step: The current step (used in the model filename).
-    """
-    save_dir.mkdir(parents=True, exist_ok=True)
-    if not (save_dir / "config.yaml").exists():
-        with open(save_dir / "config.yaml", "w") as f:
-            yaml.dump(config, f)
-        logger.info("Saved config to %s", save_dir / "config.yaml")
-
-    model_file = save_dir / f"model_step_{step}.pt"
-    torch.save(model.state_dict(), model_file)
-    logger.info("Saved model to %s", model_file)
-
-
-MODEL_CHECKPOINT_ARTIFACT_NAME = "model-checkpoint"
-CONFIG_FILE_NAME = "config.yaml"
-MODEL_FILE_NAME = "model.pt"
-
-
-# def load_model_from_wandb[T: SaveableModule](
-#     run_path: str,
-#     model_class: type[T],
-#     model_params: dict[str, Any] | None = None,
-#     version: str = "latest",
-#     device: torch.device | None = None,
-# ) -> T:
-#     """Load a model checkpoint from Weights & Biases.
-
-#     This function supports two loading modes:
-#     1. Loading a SaveableModule using its config file (when model_params is None)
-#     2. Loading an AcausalCrosscoder with explicit parameters (when model_params is provided)
-
-#     Args:
-#         run_path: The path to the run in format "entity/project/run_id"
-#         model_class: The class of the model to load
-#         model_params: Optional dictionary of model parameters. If None, will load from config.yaml
-#         version: Version of the artifact to load. Defaults to "latest"
-#         device: Device to load the model to. Defaults to auto-detection
-
-#     Returns:
-#         The loaded model of type T.
-#     """
-#     if device is None:
-#         device = get_device()
-
-#     api = wandb.Api()
-#     entity, project, run_id = run_path.split("/")
-#     run = api.run(f"{entity}/{project}/{run_id}")
-
-#     with tempfile.TemporaryDirectory() as temp_dir:
-#         temp_dir_path = Path(temp_dir)
-
-#         if model_params is None:
-#             # Load using config file (SaveableModule approach)
-#             cfg_file = cast(File, run.file(CONFIG_FILE_NAME))
-#             cfg_file.download(root=temp_dir)
-#             with open(temp_dir_path / CONFIG_FILE_NAME) as f:
-#                 cfg_dict = yaml.safe_load(f)
-#             model = model_class.from_cfg(cfg_dict)
-#             checkpoint_name = MODEL_FILE_NAME
-#         else:
-#             # Load using explicit parameters (AcausalCrosscoder approach)
-#             model = model_class(**model_params)
-#             artifact = api.artifact(f"{run_path}/model-checkpoint:{version}")
-#             artifact_dir = artifact.download(root=temp_dir)
-#             checkpoint_name = Path(artifact.file()).name
-
-#         # Load state dict
-#         checkpoint_path = temp_dir_path / checkpoint_name
-#         state_dict = torch.load(checkpoint_path, map_location=device)
-#         model.load_state_dict(state_dict)
-#         model.to(device)
-
-#         return model
+    @classmethod
+    def load(cls, basepath: Path):
+        with open(basepath / "model.cfg") as f:
+            cfg = yaml.safe_load(f)
+            model = cls._from_cfg(cfg)
+        model.load_state_dict(torch.load(basepath / "model.pt"))
+        return model
 
 
 # 1: this signature allows us to use these norms in einops.reduce
@@ -247,7 +171,7 @@ def calculate_explained_variance_ML(
 def get_explained_var_dict(explained_variance_ML: torch.Tensor, layers_to_harvest: list[int]) -> dict[str, float]:
     num_models, _n_layers = explained_variance_ML.shape
     explained_variances_dict = {
-        f"train/explained_variance/M{model_idx}_L{layer_number}": explained_variance_ML[model_idx, layer_idx].item()
+        f"train/explained_variance_M{model_idx}_L{layer_number}": explained_variance_ML[model_idx, layer_idx].item()
         for model_idx in range(num_models)
         for layer_idx, layer_number in enumerate(layers_to_harvest)
     }
@@ -261,5 +185,20 @@ def get_decoder_norms_H(W_dec_HMLD: torch.Tensor) -> torch.Tensor:
     return norms_H
 
 
-def size_GB(tensor: torch.Tensor) -> float:
-    return tensor.numel() * tensor.element_size() / (1024**3)
+def size_human_readable(tensor: torch.Tensor) -> str:
+    # Calculate the number of bytes in the tensor
+    num_bytes = tensor.numel() * tensor.element_size()
+
+    if num_bytes >= 1024**3:
+        return f"{num_bytes / (1024**3):.2f} GB"
+    elif num_bytes >= 1024**2:
+        return f"{num_bytes / (1024**2):.2f} MB"
+    elif num_bytes >= 1024:
+        return f"{num_bytes / 1024:.2f} KB"
+    else:
+        return f"{num_bytes} B"
+
+
+# hacky but useful for debugging
+def inspect(tensor: torch.Tensor) -> str:
+    return f"{tensor.shape}, dtype={tensor.dtype}, device={tensor.device}, size={size_human_readable(tensor)}"

@@ -7,8 +7,8 @@ from model_diffing.dataloader.activations import (
     ScaledActivationsDataloader,
 )
 from model_diffing.dataloader.token_loader import (
-    CommonCorpusTokenSequenceLoader,
     ConnorGemma2TokenSequenceLoader,
+    HuggingfaceTextDatasetTokenSequenceLoader,
     TokenSequenceLoader,
     ToyOverfittingTokenSequenceLoader,
 )
@@ -18,6 +18,7 @@ from model_diffing.scripts.llms import build_llms
 
 def build_dataloader(
     cfg: DataConfig,
+    batch_size: int,
     cache_dir: str,
     device: torch.device,
 ) -> BaseActivationsDataloader:
@@ -37,6 +38,7 @@ def build_dataloader(
         cfg=cfg.sequence_iterator,
         cache_dir=cache_dir,
         tokenizer=tokenizer,
+        batch_size=cfg.activations_harvester.harvesting_batch_size,
     )
 
     # then, run these sequences through the model to get activations
@@ -49,7 +51,7 @@ def build_dataloader(
         token_sequence_loader=token_sequence_loader,
         activations_harvester=activations_harvester,
         activations_shuffle_buffer_size=cfg.activations_shuffle_buffer_size,
-        yield_batch_size=cfg.cc_training_batch_size,
+        yield_batch_size=batch_size,
         device=device,
         n_batches_for_norm_estimate=cfg.n_batches_for_norm_estimate,
     )
@@ -61,32 +63,29 @@ def _build_tokens_sequence_loader(
     cfg: SequenceIteratorConfig,
     cache_dir: str,
     tokenizer: PreTrainedTokenizerBase,
+    batch_size: int,
 ) -> TokenSequenceLoader:
-    if cfg.classname == "CommonCorpusTokenSequenceLoader":
+    if cfg.classname == "HuggingfaceTextDatasetTokenSequenceLoader":
         if cfg.kwargs is None:
-            raise ValueError("kwargs must be provided for common_corpus")
-        if cfg.kwargs["sequence_length"] is None:
-            raise ValueError("sequence_length must be provided for common_corpus")
-        if cfg.kwargs["shuffle_buffer_size"] is None:
-            raise ValueError("shuffle_buffer_size must be provided for common_corpus")
-        return CommonCorpusTokenSequenceLoader(
+            raise ValueError("kwargs must be provided")
+        return HuggingfaceTextDatasetTokenSequenceLoader(
+            hf_dataset_name=cfg.kwargs["hf_dataset_name"],
             cache_dir=cache_dir,
             tokenizer=tokenizer,
-            batch_size=cfg.batch_size,
+            batch_size=batch_size,
             **cfg.kwargs,
         )
     elif cfg.classname == "ConnorGemma2TokenSequenceLoader":
         return ConnorGemma2TokenSequenceLoader(
             cache_dir=cache_dir,
-            batch_size=cfg.batch_size,
+            batch_size=batch_size,
         )
     elif cfg.classname == "ToyOverfittingTokenSequenceLoader":
         if cfg.kwargs is None:
-            raise ValueError("kwargs must be provided for common_corpus")
-        if cfg.kwargs["sequence_length"] is None:
-            raise ValueError("sequence_length must be provided for common_corpus")
+            raise ValueError("kwargs must be provided")
         return ToyOverfittingTokenSequenceLoader(
-            batch_size=cfg.batch_size,
+            batch_size=batch_size,
             **cfg.kwargs,
         )
+
     raise ValueError(f"Unknown tokens sequence iterator config name: {cfg}")

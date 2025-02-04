@@ -1,6 +1,5 @@
-from pydantic import BaseModel
-
 from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainConfig
+from model_diffing.utils import BaseModel
 
 
 class L1CrosscoderConfig(BaseModel):

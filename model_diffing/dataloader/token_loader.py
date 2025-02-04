@@ -17,27 +17,31 @@ class TokenSequenceLoader(ABC):
     def num_batches(self) -> int | None: ...  # not using __len__ because __len__ doesn't work well with `| None`
 
 
-class CommonCorpusTokenSequenceLoader(TokenSequenceLoader):
-    COMMON_CORPUS_HF_DATASET = "PleIAs/common_corpus"
+COMMON_CORPUS_HF_DATASET = "PleIAs/common_corpus"
+THE_PILE_UNCOPYRIGHTED_HF_DATASET = "monology/pile-uncopyrighted"
 
+
+class HuggingfaceTextDatasetTokenSequenceLoader(TokenSequenceLoader):
     def __init__(
         self,
+        hf_dataset_name: str,
         tokenizer: PreTrainedTokenizerBase,
         sequence_length: int,
         shuffle_buffer_size: int,
         batch_size: int,
         cache_dir: str | None = None,
     ):
+        self.hf_dataset_name = hf_dataset_name
         self._cache_dir = cache_dir
         self._tokenizer = tokenizer
         self._sequence_length = sequence_length
         self._shuffle_buffer_size = shuffle_buffer_size
         self._batch_size = batch_size
 
+        self._iterator = self._get_sequences_batch_iterator()
+
     def _get_sequence_iterator(self) -> Iterator[torch.Tensor]:
-        text_dataset = load_dataset(
-            self.COMMON_CORPUS_HF_DATASET, streaming=True, cache_dir=self._cache_dir, split="train"
-        )
+        text_dataset = load_dataset(self.hf_dataset_name, streaming=True, cache_dir=self._cache_dir, split="train")
 
         for example in text_dataset:
             example = cast(dict[str, Any], example)
@@ -51,15 +55,19 @@ class CommonCorpusTokenSequenceLoader(TokenSequenceLoader):
             for i in range(0, num_full_sequences * self._sequence_length, self._sequence_length):
                 yield seq_tokens_S[i : i + self._sequence_length]
 
-    def get_sequences_batch_iterator(self) -> Iterator[torch.Tensor]:
-        # then, shuffle this iterator (only between, not within, sequences) so that we don't have to worry
+    def _get_sequences_batch_iterator(self) -> Iterator[torch.Tensor]:
+        # we shuffle this iterator (only between, not within, sequences) so that we don't have to worry
         # about long documents introducing high feature correlations
-        # this shuffler returns batches, hence (B, S)
+        # this shuffler returns batches of sequences of tokens.
         return batch_shuffle_tensor_iterator_BX(
             tensor_iterator_X=self._get_sequence_iterator(),
             shuffle_buffer_size=self._shuffle_buffer_size,
             yield_batch_size=self._batch_size,
+            name=f"{self.hf_dataset_name} sequences",
         )
+
+    def get_sequences_batch_iterator(self) -> Iterator[torch.Tensor]:
+        return self._iterator
 
     def num_batches(self) -> int | None:
         # This kind of can't easily be computed, because it's a function of sequence length and each example's length
@@ -133,24 +141,19 @@ class ConnorGemma2TokenSequenceLoader(TokenSequenceLoader):
 #     def __iter__(self) -> Iterator[torch.Tensor]:
 #         return iter(self.tokens_AS)
 
-# from itertools import islice
-
-# class ThePileTokenSequenceIterator(TokenSequenceLoader):
-#     HF_TOKENISED_DATASET = "EleutherAI/pile"
-
-#     def __init__(self, cache_dir: str):
-#         self._cache_dir = cache_dir
-
-#     def get_sequence_iterator(self) -> Iterator[torch.Tensor]:
-#         dataset = load_dataset(self.HF_TOKENISED_DATASET, streaming=True, cache_dir=self._cache_dir, split="train")
-#         for example in dataset:
-#             tokens = torch.tensor(example["input_ids"])  # type: ignore
-#             yield tokens
-
 
 if __name__ == "__main__":
     from itertools import islice
 
-    token_loader = ConnorGemma2TokenSequenceLoader(cache_dir=".cache", batch_size=16)
+    from transformers import AutoTokenizer
+
+    token_loader = HuggingfaceTextDatasetTokenSequenceLoader(
+        hf_dataset_name=THE_PILE_UNCOPYRIGHTED_HF_DATASET,
+        tokenizer=AutoTokenizer.from_pretrained("EleutherAI/pythia-160m"),
+        cache_dir=".cache",
+        batch_size=16,
+        sequence_length=1024,
+        shuffle_buffer_size=2**14,  # 16k
+    )
     for tokens in islice(token_loader.get_sequences_batch_iterator(), 10):
         print(tokens.shape)
