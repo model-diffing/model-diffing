@@ -1,19 +1,17 @@
-import os
-
 import fire  # type: ignore
 
 from model_diffing.data.token_layer_dataloader import build_sliding_window_dataloader
 from model_diffing.log import logger
 from model_diffing.models.activations.relu import ReLUActivation
 from model_diffing.scripts.base_trainer import run_exp
-from model_diffing.scripts.train_sliding_window.run import TokenLayerCrosscoder
-from model_diffing.scripts.train_sliding_window_l1.config import L1SlidingWindowExperimentConfig
-from model_diffing.scripts.train_sliding_window_l1.trainer import BiTokenCCWrapper, SlidingWindowCrosscoderTrainer
+from model_diffing.scripts.train_jumprelu_sliding_window.run import TokenLayerCrosscoder
+from model_diffing.scripts.train_l1_sliding_window.config import L1SlidingWindowExperimentConfig
+from model_diffing.scripts.train_l1_sliding_window.trainer import BiTokenCCWrapper, L1SlidingWindowCrosscoderTrainer
 from model_diffing.scripts.utils import build_wandb_run
 from model_diffing.utils import get_device
 
 
-def _build_sliding_window_crosscoder_trainer(cfg: L1SlidingWindowExperimentConfig) -> SlidingWindowCrosscoderTrainer:
+def _build_sliding_window_crosscoder_trainer(cfg: L1SlidingWindowExperimentConfig) -> L1SlidingWindowCrosscoderTrainer:
     device = get_device()
 
     dataloader = build_sliding_window_dataloader(cfg.data, cfg.train.batch_size, cfg.cache_dir, device)
@@ -30,7 +28,7 @@ def _build_sliding_window_crosscoder_trainer(cfg: L1SlidingWindowExperimentConfi
             d_model=d_model,
             hidden_dim=cfg.crosscoder.hidden_dim,
             dec_init_norm=cfg.crosscoder.dec_init_norm,
-            hidden_activation=ReLUActivation(size=cfg.crosscoder.hidden_dim),
+            hidden_activation=ReLUActivation(),
         )
         for window_size in [1, 2]
     ]
@@ -40,7 +38,7 @@ def _build_sliding_window_crosscoder_trainer(cfg: L1SlidingWindowExperimentConfi
 
     wandb_run = build_wandb_run(cfg) if cfg.wandb else None
 
-    return SlidingWindowCrosscoderTrainer(
+    return L1SlidingWindowCrosscoderTrainer(
         cfg=cfg.train,
         activations_dataloader=dataloader,
         crosscoders=crosscoders,
@@ -52,6 +50,5 @@ def _build_sliding_window_crosscoder_trainer(cfg: L1SlidingWindowExperimentConfi
 
 
 if __name__ == "__main__":
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
     logger.info("Starting...")
     fire.Fire(run_exp(_build_sliding_window_crosscoder_trainer, L1SlidingWindowExperimentConfig))

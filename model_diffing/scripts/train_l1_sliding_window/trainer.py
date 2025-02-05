@@ -1,8 +1,10 @@
 from dataclasses import dataclass
+from functools import partial
 from itertools import islice
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
+import numpy as np
 import torch as t
 import torch.nn as nn
 from torch.nn.utils import clip_grad_norm_
@@ -14,7 +16,7 @@ from model_diffing.log import logger
 from model_diffing.models.activations.relu import ReLUActivation
 from model_diffing.scripts.base_trainer import save_config, validate_num_steps_per_epoch
 from model_diffing.scripts.train_l1_crosscoder.config import L1TrainConfig
-from model_diffing.scripts.train_sliding_window.run import TokenLayerCrosscoder
+from model_diffing.scripts.train_jumprelu_sliding_window.run import TokenLayerCrosscoder
 from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer
 from model_diffing.utils import (
     SaveableModule,
@@ -75,7 +77,7 @@ class BiTokenCCWrapper(nn.Module, Generic[TAct]):
         return t.Tensor(0)
 
 
-class SlidingWindowCrosscoderTrainer:
+class L1SlidingWindowCrosscoderTrainer:
     def __init__(
         self,
         cfg: L1TrainConfig,
@@ -145,55 +147,59 @@ class SlidingWindowCrosscoderTrainer:
     def _train_step(self, batch_BTLD: t.Tensor) -> None:
         self.optimizer.zero_grad()
 
-        # fwd
+        # Forward pass
         res = self.crosscoders.forward_train(batch_BTLD)
-
         reconstructed_acts_BTLD = t.cat([res.recon_B1LD_single1, res.recon_B1LD_single2], dim=1) + res.recon_B2LD_double
         assert reconstructed_acts_BTLD.shape == batch_BTLD.shape, "fuck"
-        hidden_B3H = t.cat(
-            [
-                res.hidden_BH_single1,
-                res.hidden_BH_double,
-                res.hidden_BH_single2,
-            ],
-            dim=-1,
-        )
 
-        W_dec_3HTLD = t.cat(
-            [
-                self.crosscoders.single_cc.W_dec_HTLD,
-                self.crosscoders.double_cc.W_dec_HTLD,
-                self.crosscoders.single_cc.W_dec_HTLD,
-            ],
-            dim=0,
-        )
+        reconstruction_loss = calculate_reconstruction_loss(batch_BTLD, reconstructed_acts_BTLD)
 
-        sparsity_loss = weighted_l1_sparsity_loss(
-            W_dec_HTMLD=W_dec_3HTLD[:, :, None],
-            hidden_BH=hidden_B3H,
-            layer_reduction=l1_norm,
+        sparsity_loss_fn = partial(
+            weighted_l1_sparsity_loss,
+            layer_reduction=l1_norm,  # encourage layer-level sparsity
             model_reduction=l1_norm,  # sum is a noop on a singleton dim
             token_reduction=l2_norm,  # don't want to encourage token-level sparsity
         )
 
-        reconstruction_loss = calculate_reconstruction_loss(batch_BTLD, reconstructed_acts_BTLD)
+        sparsity_loss_single1 = sparsity_loss_fn(
+            W_dec_HTMLD=self.crosscoders.single_cc.W_dec_HTLD[:, :, None],
+            hidden_BH=res.hidden_BH_single1,
+        )
+        sparsity_loss_single2 = sparsity_loss_fn(
+            W_dec_HTMLD=self.crosscoders.single_cc.W_dec_HTLD[:, :, None],
+            hidden_BH=res.hidden_BH_single2,
+        )
+        sparsity_loss_double = sparsity_loss_fn(
+            W_dec_HTMLD=self.crosscoders.double_cc.W_dec_HTLD[:, :, None],
+            hidden_BH=res.hidden_BH_double,
+        )
+        sparsity_loss = sparsity_loss_single1 + sparsity_loss_single2 + sparsity_loss_double
 
         loss = reconstruction_loss + self._lambda_s_scheduler() * sparsity_loss
 
-        # backward
+        # Backward pass
         loss.backward()
         clip_grad_norm_(self.crosscoders.parameters(), 1.0)
         self.optimizer.step()
 
-        assert len(self.optimizer.param_groups) == 1, "sanity check failed"
+        # Update learning rate according to scheduler.
         self.optimizer.param_groups[0]["lr"] = self.lr_scheduler(self.step)
+
+        hidden_B3H = t.cat(
+            [res.hidden_BH_single1, res.hidden_BH_double, res.hidden_BH_single2],
+            dim=-1,
+        )
 
         if (
             self.cfg.log_every_n_steps is not None
             and self.step % self.cfg.log_every_n_steps == 0
             and self.wandb_run is not None
         ):
-            mean_l0 = l0_norm(hidden_B3H, dim=-1).mean()
+            # Instead of building a chart with `get_l0_stats`, we compute and log the values as scalars.
+            l0_B = l0_norm(hidden_B3H, dim=-1)
+            l0_np = l0_B.detach().cpu().numpy()
+            mean_l0 = l0_B.mean().item()
+            l0_5, l0_25, l0_75, l0_95 = np.percentile(l0_np, [5, 25, 75, 95])
 
             explained_variance_dict = get_explained_var_dict(
                 calculate_explained_variance_X(batch_BTLD, reconstructed_acts_BTLD),
@@ -206,8 +212,14 @@ class SlidingWindowCrosscoderTrainer:
                 "train/sparsity_loss": sparsity_loss.item(),
                 "train/lambda_s": self._lambda_s_scheduler(),
                 #
-                "train/mean_l0": mean_l0.item(),
-                "train/mean_l0_pct": mean_l0.item() / hidden_B3H.shape[1],
+                "train/mean_l0_pct": l0_B.mean().item() / hidden_B3H.shape[1],
+                # Log grouped l0 statistics as scalars.
+                "train/l0/step": self.step,
+                "train/l0/5th": l0_5,
+                "train/l0/25th": l0_25,
+                "train/l0/mean": mean_l0,
+                "train/l0/75th": l0_75,
+                "train/l0/95th": l0_95,
                 #
                 "train/loss": loss.item(),
                 #

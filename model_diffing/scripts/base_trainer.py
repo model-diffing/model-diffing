@@ -1,3 +1,4 @@
+import os
 from abc import abstractmethod
 from collections.abc import Callable
 from itertools import islice
@@ -148,6 +149,8 @@ TCfg = TypeVar("TCfg", bound=BaseExperimentConfig)
 
 
 def run_exp(build_trainer: Callable[[TCfg], Any], cfg_cls: type[TCfg]) -> Callable[[Path], None]:
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
     def inner(config_path: Path) -> None:
         config_path = Path(config_path)
         assert config_path.suffix == ".yaml", f"Config file {config_path} must be a YAML file."

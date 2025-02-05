@@ -1,4 +1,3 @@
-import os
 from typing import Generic, TypeVar
 
 import fire  # type: ignore
@@ -15,8 +14,8 @@ from model_diffing.models.activations import JumpReLUActivation
 from model_diffing.models.crosscoder import AcausalCrosscoder
 from model_diffing.scripts.base_trainer import run_exp
 from model_diffing.scripts.train_jan_update_crosscoder.config import JumpReLUConfig
-from model_diffing.scripts.train_sliding_window.config import SlidingWindowExperimentConfig
-from model_diffing.scripts.train_sliding_window.trainer import BiTokenCCWrapper, SlidingWindowCrosscoderTrainer
+from model_diffing.scripts.train_jumprelu_sliding_window.config import SlidingWindowExperimentConfig
+from model_diffing.scripts.train_jumprelu_sliding_window.trainer import BiTokenCCWrapper, JumpreluSlidingWindowCrosscoderTrainer
 from model_diffing.scripts.utils import build_wandb_run
 from model_diffing.utils import SaveableModule, get_device, inspect
 
@@ -49,7 +48,7 @@ class TokenLayerCrosscoder(AcausalCrosscoder[TAct], Generic[TAct]):
         assert self.b_dec_TLD.shape == (token_window_size, n_layers, d_model)
 
 
-def _build_sliding_window_crosscoder_trainer(cfg: SlidingWindowExperimentConfig) -> SlidingWindowCrosscoderTrainer:
+def _build_sliding_window_crosscoder_trainer(cfg: SlidingWindowExperimentConfig) -> JumpreluSlidingWindowCrosscoderTrainer:
     device = get_device()
 
     dataloader = build_sliding_window_dataloader(cfg.data, cfg.train.batch_size, cfg.cache_dir, device)
@@ -77,7 +76,7 @@ def _build_sliding_window_crosscoder_trainer(cfg: SlidingWindowExperimentConfig)
 
     wandb_run = build_wandb_run(cfg) if cfg.wandb else None
 
-    return SlidingWindowCrosscoderTrainer(
+    return JumpreluSlidingWindowCrosscoderTrainer(
         cfg=cfg.train,
         activations_dataloader=dataloader,
         crosscoders=crosscoders,
@@ -214,6 +213,5 @@ def _harvest_pre_bias_NH(
 
 
 if __name__ == "__main__":
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
     logger.info("Starting...")
     fire.Fire(run_exp(_build_sliding_window_crosscoder_trainer, SlidingWindowExperimentConfig))

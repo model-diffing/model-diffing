@@ -5,7 +5,6 @@ from typing import Any
 
 import torch as t
 import torch.nn as nn
-import wandb
 from torch.nn.utils import clip_grad_norm_
 from wandb.sdk.wandb_run import Run
 
@@ -15,7 +14,7 @@ from model_diffing.models.activations.jumprelu import JumpReLUActivation
 from model_diffing.models.crosscoder import AcausalCrosscoder
 from model_diffing.scripts.base_trainer import save_config, validate_num_steps_per_epoch
 from model_diffing.scripts.train_jan_update_crosscoder.config import JanUpdateTrainConfig
-from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer
+from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer, wandb_histogram
 from model_diffing.utils import (
     calculate_explained_variance_X,
     calculate_reconstruction_loss,
@@ -70,7 +69,7 @@ class BiTokenCCWrapper(nn.Module):
         return t.Tensor(0)
 
 
-class SlidingWindowCrosscoderTrainer:
+class JumpreluSlidingWindowCrosscoderTrainer:
     def __init__(
         self,
         cfg: JanUpdateTrainConfig,
@@ -183,24 +182,27 @@ class SlidingWindowCrosscoderTrainer:
         ):
             mean_l0 = l0_norm(hidden_B3H, dim=-1).mean()
 
-            thresholds_single_H = (
-                self.crosscoders.single_cc.hidden_activation.log_threshold_H.exp().detach().cpu().numpy().tolist()
-            )
-            thresholds_both_H = (
-                self.crosscoders.double_cc.hidden_activation.log_threshold_H.exp().detach().cpu().numpy().tolist()
-            )
+            thresholds_single_hist = wandb_histogram(self.crosscoders.single_cc.hidden_activation.log_threshold_H.exp())
 
-            thresholds_single_hist = wandb.Histogram(sequence=thresholds_single_H, num_bins=100)
-            thresholds_both_hist = wandb.Histogram(sequence=thresholds_both_H, num_bins=100)
+            thresholds_both_hist = wandb_histogram(self.crosscoders.double_cc.hidden_activation.log_threshold_H.exp())
 
-            # with t.no_grad():
-            # cc1_pre_biases_BH = einsum(batch_BTLD, self.crosscoders.crosscoder1.W_enc_TLDH, "b t m l d, t m l d h -> b h")
-            # cc1_pre_biases_hist = wandb.Histogram(sequence=cc1_pre_biases_BH.flatten().detach().cpu().numpy().tolist(), num_bins=100)
+            with t.no_grad():
+                from einops import einsum
 
-            # cc2_pre_biases_BH = einsum(batch_BTLD, self.crosscoders.crosscoder2.W_enc_TLDH, "b t m l d, t m l d h -> b h")
-            # cc2_pre_biases_hist = wandb.Histogram(sequence=cc2_pre_biases_BH.flatten().detach().cpu().numpy().tolist(), num_bins=100)
+                cc1_t1_pre_biases_BH = einsum(
+                    batch_BTLD[:, 0][:, None], self.crosscoders.single_cc.W_enc_XDH, "b t l d, t l d h -> b h"
+                )
+                cc1_t1_pre_biases_hist = wandb_histogram(cc1_t1_pre_biases_BH.flatten())
 
-            # activations_hist = wandb.Histogram(sequence=hidden_B3H.flatten().detach().cpu().numpy().tolist(), num_bins=100)
+                cc1_t2_pre_biases_BH = einsum(
+                    batch_BTLD[:, 1][:, None], self.crosscoders.single_cc.W_enc_XDH, "b t l d, t l d h -> b h"
+                )
+                cc1_t2_pre_biases_hist = wandb_histogram(cc1_t2_pre_biases_BH.flatten())
+
+                cc2_pre_biases_BH = einsum(batch_BTLD, self.crosscoders.double_cc.W_enc_XDH, "b t l d, t l d h -> b h")
+                cc2_pre_biases_hist = wandb_histogram(cc2_pre_biases_BH.flatten())
+
+                activations_hist = wandb_histogram(hidden_B3H)
 
             explained_variance_dict = get_explained_var_dict(
                 calculate_explained_variance_X(batch_BTLD, reconstructed_acts_BTLD),
@@ -232,6 +234,11 @@ class SlidingWindowCrosscoderTrainer:
                 "train/epoch": self.epoch,
                 "train/unique_tokens_trained": self.unique_tokens_trained,
                 "train/learning_rate": self.optimizer.param_groups[0]["lr"],
+                #
+                "media/cc1_t1_pre_biases": cc1_t1_pre_biases_hist,
+                "media/cc1_t2_pre_biases": cc1_t2_pre_biases_hist,
+                "media/cc2_pre_biases": cc2_pre_biases_hist,
+                "media/activations": activations_hist,
             }
 
             self.wandb_run.log(log_dict, step=self.step)

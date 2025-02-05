@@ -1,5 +1,3 @@
-import os
-
 import fire  # type: ignore
 import torch
 from einops import rearrange
@@ -176,6 +174,5 @@ def _harvest_pre_bias_NH(
 
 
 if __name__ == "__main__":
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
     logger.info("Starting...")
     fire.Fire(run_exp(build_jan_update_crosscoder_trainer, JanUpdateExperimentConfig))

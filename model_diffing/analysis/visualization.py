@@ -1,5 +1,3 @@
-from typing import cast
-
 import pandas as pd  # type: ignore
 import plotly.express as px  # type: ignore
 import plotly.graph_objs as go  # type: ignore
@@ -7,38 +5,6 @@ import torch
 from plotly.subplots import make_subplots  # type: ignore
 
 from model_diffing.analysis import metrics
-
-
-def create_cosine_sim_and_relative_norm_histogram_data(
-    W_dec_HMLD: torch.Tensor,
-    layers: list[int],
-) -> dict[str, list[float]]:
-    _, n_models, num_layers, _ = W_dec_HMLD.shape
-    assert n_models == 2, "only works for 2 models"
-
-    plots: dict[str, list[float]] = {}
-    for layer_idx in range(num_layers):
-        layer_name = layers[layer_idx]  # layer_idx is the index into the list of layers we're collecting
-        W_dec_a_HD = W_dec_HMLD[:, 0, layer_idx]
-        W_dec_b_HD = W_dec_HMLD[:, 1, layer_idx]
-
-        relative_norms = metrics.compute_relative_norms_N(W_dec_a_HD, W_dec_b_HD)
-        rel_vals = relative_norms.detach().cpu().numpy().tolist()
-        assert isinstance(rel_vals, list)
-        assert isinstance(rel_vals[0], float)
-
-        plots[f"relative_decoder_norms_layer_{layer_name}"] = cast(list[float], rel_vals)
-
-        shared_latent_mask = metrics.get_shared_latent_mask(relative_norms)
-        cosine_sims = metrics.compute_cosine_similarities_N(W_dec_a_HD, W_dec_b_HD)
-        shared_features_cosine_sims = cosine_sims[shared_latent_mask]
-        shared_features_cosine_sims_vals = shared_features_cosine_sims.detach().cpu().numpy().tolist()
-        assert isinstance(shared_features_cosine_sims_vals, list)
-        assert isinstance(shared_features_cosine_sims_vals[0], float)
-
-        plots[f"cosine_sim_layer_{layer_name}"] = cast(list[float], shared_features_cosine_sims_vals)
-
-    return plots
 
 
 def plot_relative_norms(vectors_a_NF: torch.Tensor, vectors_b_NF: torch.Tensor, title: str | None = None) -> go.Figure:

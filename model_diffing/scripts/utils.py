@@ -1,14 +1,58 @@
 from collections.abc import Callable, Iterator
 from itertools import islice
 
+import numpy as np
 import torch
 import wandb
+import wandb.plot.custom_chart
 from einops import reduce
 from tqdm import tqdm  # type: ignore
 from wandb.sdk.wandb_run import Run
 
+from model_diffing.analysis import metrics
 from model_diffing.scripts.config_common import AdamDecayTo0LearningRateConfig, BaseExperimentConfig
 from model_diffing.utils import l2_norm
+
+
+def get_l0_stats(l0_B: torch.Tensor, step: int) -> dict[str, float]:
+    mean_l0 = l0_B.mean().item()
+    l0_np = l0_B.detach().cpu().numpy()
+    l0_5, l0_25, l0_75, l0_95 = np.percentile(l0_np, [5, 25, 75, 95])
+    return {
+        "train/l0/step": step,
+        "train/l0/5th": l0_5,
+        "train/l0/25th": l0_25,
+        "train/l0/mean": mean_l0,
+        "train/l0/75th": l0_75,
+        "train/l0/95th": l0_95,
+    }
+
+
+def create_cosine_sim_and_relative_norm_histograms(
+    W_dec_HMLD: torch.Tensor, layers: list[int]
+) -> dict[str, wandb.Histogram]:
+    _, n_models, num_layers, _ = W_dec_HMLD.shape
+    assert n_models == 2, "only works for 2 models"
+
+    plots: dict[str, wandb.Histogram] = {}
+    for layer_idx in range(num_layers):
+        layer_name = layers[layer_idx]  # layer_idx is the index into the list of layers we're collecting
+        W_dec_a_HD = W_dec_HMLD[:, 0, layer_idx]
+        W_dec_b_HD = W_dec_HMLD[:, 1, layer_idx]
+
+        relative_norms = metrics.compute_relative_norms_N(W_dec_a_HD, W_dec_b_HD)
+        plots[f"media/relative_decoder_norms_layer_{layer_name}"] = wandb_histogram(relative_norms)
+
+        shared_latent_mask = metrics.get_shared_latent_mask(relative_norms)
+        cosine_sims = metrics.compute_cosine_similarities_N(W_dec_a_HD, W_dec_b_HD)
+        shared_features_cosine_sims = cosine_sims[shared_latent_mask]
+        plots[f"media/cosine_sim_layer_{layer_name}"] = wandb_histogram(shared_features_cosine_sims)
+
+    return plots
+
+
+def wandb_histogram(data_X: torch.Tensor) -> wandb.Histogram:
+    return wandb.Histogram(np_histogram=np.histogram(data_X.detach().cpu().numpy()))
 
 
 def build_wandb_run(config: BaseExperimentConfig) -> Run | None:

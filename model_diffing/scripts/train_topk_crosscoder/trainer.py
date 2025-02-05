@@ -1,13 +1,12 @@
 from typing import Any
 
 import torch
-import wandb
 from torch.nn.utils import clip_grad_norm_
 
-from model_diffing.analysis.visualization import create_cosine_sim_and_relative_norm_histogram_data
 from model_diffing.models.activations.topk import TopkActivation
 from model_diffing.scripts.base_trainer import BaseModelLayerTrainer
 from model_diffing.scripts.config_common import BaseTrainConfig
+from model_diffing.scripts.utils import create_cosine_sim_and_relative_norm_histograms
 from model_diffing.utils import calculate_explained_variance_X, calculate_reconstruction_loss, get_explained_var_dict
 
 
@@ -51,12 +50,11 @@ class TopKTrainer(BaseModelLayerTrainer[BaseTrainConfig, TopkActivation]):
             if self.n_models == 2:
                 W_dec_HXD = self.crosscoder.W_dec_HXD.detach().cpu()
                 assert W_dec_HXD.shape[1:-1] == (self.n_models, self.n_layers)
-                hist_data = create_cosine_sim_and_relative_norm_histogram_data(
-                    W_dec_HMLD=W_dec_HXD,
-                    layers=self.layers_to_harvest,
-                )
                 log_dict.update(
-                    {f"media/{name}": wandb.Histogram(sequence=data, num_bins=100) for name, data in hist_data.items()}
+                    create_cosine_sim_and_relative_norm_histograms(
+                        W_dec_HMLD=W_dec_HXD,
+                        layers=self.layers_to_harvest,
+                    )
                 )
 
             self.wandb_run.log(log_dict, step=self.step)
