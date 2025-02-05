@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from functools import partial
+from itertools import product
 from pathlib import Path
 from typing import Any
 
@@ -112,7 +113,7 @@ sparsity_loss_l1_of_norms = partial(
 )
 
 
-def calculate_reconstruction_loss(activation_BTMLD: torch.Tensor, target_BTMLD: torch.Tensor) -> torch.Tensor:
+def calculate_reconstruction_loss(activation_BXD: torch.Tensor, target_BXD: torch.Tensor) -> torch.Tensor:
     """This is a little weird because we have both model and layer dimensions, so it's worth explaining deeply:
 
     The reconstruction loss is a sum of squared L2 norms of the error for each activation space being reconstructed.
@@ -124,10 +125,13 @@ def calculate_reconstruction_loss(activation_BTMLD: torch.Tensor, target_BTMLD: 
 
     $$ \\sum_{m \\in M} \\sum_{l \\in L} \\|a_m^l(x_j) - a_m^{l'}(x_j)\\|^2 $$
     """
-    error_BTMLD = activation_BTMLD - target_BTMLD
-    error_norm_BTML = reduce(error_BTMLD, "batch token model layer d_model -> batch token model layer", l2_norm)
-    squared_error_norm_BTML = error_norm_BTML.square()
-    summed_squared_error_norm_B = reduce(squared_error_norm_BTML, "batch token model layer -> batch", torch.sum)
+    # take the L2 norm of the error inside each d_model feature space
+    error_BXD = activation_BXD - target_BXD
+    error_norm_BX = reduce(error_BXD, "batch ... d_model -> batch ...", l2_norm)
+    squared_error_norm_BX = error_norm_BX.square()
+
+    # sum errors across all crosscoding dimensions
+    summed_squared_error_norm_B = reduce(squared_error_norm_BX, "batch ... -> batch", torch.sum)
     return summed_squared_error_norm_B.mean()
 
 
@@ -153,38 +157,53 @@ def multi_reduce(
     return tensor
 
 
-def calculate_explained_variance_TML(
-    activations_BTMLD: torch.Tensor,
-    reconstructed_BTMLD: torch.Tensor,
+def calculate_explained_variance_X(
+    activations_BXD: torch.Tensor,
+    reconstructed_BXD: torch.Tensor,
     eps: float = 1e-8,
 ) -> torch.Tensor:
     """for each model and layer, calculate the mean explained variance inside each d_model feature space"""
-    error_BTMLD = activations_BTMLD - reconstructed_BTMLD
+    error_BXD = activations_BXD - reconstructed_BXD
 
-    mean_error_var_TML = error_BTMLD.var(-1).mean(0)
-    mean_activations_var_TML = activations_BTMLD.var(-1).mean(0)
+    mean_error_var_X = error_BXD.var(-1).mean(0)
+    mean_activations_var_X = activations_BXD.var(-1).mean(0)
 
-    explained_var_TML = 1 - (mean_error_var_TML / (mean_activations_var_TML + eps))
-    return explained_var_TML
+    explained_var_X = 1 - (mean_error_var_X / (mean_activations_var_X + eps))
+    return explained_var_X
 
 
-def get_explained_var_dict(explained_variance_TML: torch.Tensor, layers_to_harvest: list[int]) -> dict[str, float]:
-    num_tokens, num_models, _n_layers = explained_variance_TML.shape
-    explained_variances_dict = {
-        f"train/explained_variance_T{token_idx}_M{model_idx}_L{layer_number}": explained_variance_TML[
-            token_idx, model_idx, layer_idx
-        ].item()
-        for token_idx in range(num_tokens)
-        for model_idx in range(num_models)
-        for layer_idx, layer_number in enumerate(layers_to_harvest)
-    }
+def get_explained_var_dict(
+    explained_variance_X: torch.Tensor, *crosscoding_dims: tuple[str, list[str] | list[int]]
+) -> dict[str, float]:
+    """
+    crosscoding_dims is a list of tuples, each tuple is:
+        1: the name of the crosscoding dimension ('layer', 'model', 'token', etc.)
+        2: the labels of the crosscoding dimension (e.g. [0, 1, 7] or ['gpt2', 'gpt3', 'gpt4'], or ['<bos>', '-1', 'self'])
+    
+    the reason we need the explicit naming pattern is that often indices are not helpful. For example, when training
+    a crosscoder on layers 2, 5, and 8, you don't to want to have them labeled [0, 1, 2]. i.e. you need to know what
+    each index means.
+    """
+
+    assert len(crosscoding_dims) == len(explained_variance_X.shape)
+
+    # index_combinations is a list of tuples, each tuple is a unique set of indices into the explained_variance_X tensor
+    index_combinations = product(*(range(dim_size) for dim_size in explained_variance_X.shape))
+
+    explained_variances_dict = {}
+    for indices in index_combinations:
+        name = "train/explained_variance"
+        for (dim_name, dim_labels), dim_index in zip(crosscoding_dims, indices, strict=True):
+            name += f"_{dim_name}{dim_labels[dim_index]}"
+
+        explained_variances_dict[name] = explained_variance_X[indices].item()
 
     return explained_variances_dict
 
 
-def get_decoder_norms_H(W_dec_HTMLD: torch.Tensor) -> torch.Tensor:
-    W_dec_l2_norms_HTML = reduce(W_dec_HTMLD, "hidden token model layer dim -> hidden token model layer", l2_norm)
-    norms_H = reduce(W_dec_l2_norms_HTML, "hidden token model layer -> hidden", torch.sum)
+def get_decoder_norms_H(W_dec_HXD: torch.Tensor) -> torch.Tensor:
+    W_dec_l2_norms_HX = reduce(W_dec_HXD, "hidden ... dim -> hidden ...", l2_norm)
+    norms_H = reduce(W_dec_l2_norms_HX, "hidden ... -> hidden", torch.sum)
     return norms_H
 
 

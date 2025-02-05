@@ -1,4 +1,4 @@
-from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainConfig
+from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainConfig, DataConfig
 from model_diffing.utils import BaseModel
 
 
@@ -13,5 +13,6 @@ class L1TrainConfig(BaseTrainConfig):
 
 
 class L1ExperimentConfig(BaseExperimentConfig):
+    data: DataConfig
     crosscoder: L1CrosscoderConfig
     train: L1TrainConfig

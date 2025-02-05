@@ -65,7 +65,6 @@ class BaseTrainConfig(BaseModel):
 class BaseExperimentConfig(BaseModel):
     seed: int = 42
     cache_dir: str = ".cache"
-    data: DataConfig
     wandb: bool
     experiment_name: str
 

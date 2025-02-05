@@ -6,7 +6,7 @@ import torch
 
 from model_diffing.analysis import visualization
 from model_diffing.analysis.metrics import get_IQR_outliers_mask
-from model_diffing.dataloader.data import build_dataloader
+from model_diffing.data.model_layer_dataloader import build_dataloader
 from model_diffing.scripts import config_common
 from model_diffing.scripts.llms import build_llms
 from model_diffing.scripts.utils import collect_norms
@@ -53,11 +53,11 @@ llms = build_llms(llm_configs, cache_dir, device, dtype=activations_harvester_co
 dataloader = build_dataloader(data_config, 16, cache_dir, device)
 
 # %%
-sample_BMLD = next(dataloader.get_shuffled_activations_iterator())
+sample_BMLD = next(dataloader.get_shuffled_activations_iterator_BMLD())
 print(sample_BMLD.shape, sample_BMLD.device)
 
 # %%
-norms_NML = collect_norms(dataloader.get_shuffled_activations_iterator(), device=device, n_batches=512)
+norms_NML = collect_norms(dataloader.get_shuffled_activations_iterator_BMLD(), device=device, n_batches=512)
 print(norms_NML.shape, norms_NML.device)
 
 # %%

@@ -9,15 +9,15 @@ import wandb
 from torch.nn.utils import clip_grad_norm_
 from wandb.sdk.wandb_run import Run
 
-from model_diffing.dataloader.activations import BaseActivationsDataloader
+from model_diffing.data.token_layer_dataloader import BaseTokenLayerActivationsDataloader
 from model_diffing.log import logger
 from model_diffing.models.activations.jumprelu import JumpReLUActivation
 from model_diffing.models.crosscoder import AcausalCrosscoder
-from model_diffing.scripts.base_trainer import BaseTrainer, save_config, validate_num_steps_per_epoch
+from model_diffing.scripts.base_trainer import save_config, validate_num_steps_per_epoch
 from model_diffing.scripts.train_jan_update_crosscoder.config import JanUpdateTrainConfig
 from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer
 from model_diffing.utils import (
-    calculate_explained_variance_TML,
+    calculate_explained_variance_X,
     calculate_reconstruction_loss,
     get_decoder_norms_H,
     get_explained_var_dict,
@@ -27,54 +27,54 @@ from model_diffing.utils import (
 
 class BiTokenCCWrapper(nn.Module):
     def __init__(
-        self, crosscoder1: AcausalCrosscoder[JumpReLUActivation], crosscoder2: AcausalCrosscoder[JumpReLUActivation]
+        self,
+        single_token_cc: AcausalCrosscoder[JumpReLUActivation],
+        double_token_cc: AcausalCrosscoder[JumpReLUActivation],
     ):
         super().__init__()
 
-        assert crosscoder1.n_tokens == 1
-        self.crosscoder1 = crosscoder1
+        assert single_token_cc.crosscoding_dims[0] == 1  # token
+        assert len(single_token_cc.crosscoding_dims) == 2  # (token, layer)
+        self.single_cc = single_token_cc
 
-        assert crosscoder2.n_tokens == 2
-        self.crosscoder2 = crosscoder2
+        assert double_token_cc.crosscoding_dims[0] == 2  # token
+        assert len(double_token_cc.crosscoding_dims) == 2  # (token, layer)
+        self.double_cc = double_token_cc
 
     @dataclass
     class TrainResult:
-        tok1_recon_B1MLD: t.Tensor
-        tok2_recon_B1MLD: t.Tensor
+        tok1_recon_B1LD: t.Tensor
+        tok2_recon_B1LD: t.Tensor
         tok1_hidden_BH: t.Tensor
         tok2_hidden_BH: t.Tensor
-        both_recon_B2MLD: t.Tensor
+        both_recon_B2LD: t.Tensor
         both_hidden_BH: t.Tensor
 
-    def forward_train(self, x_BTMLD: t.Tensor) -> TrainResult:
-        assert x_BTMLD.shape[1] == 2
+    def forward_train(self, x_BTLD: t.Tensor) -> TrainResult:
+        assert x_BTLD.shape[1] == 2
 
-        # single_tok_Bt1MLD = rearrange(x_BTMLD, "b t m l d -> (b t) 1 m l d")
-
-        # res1_Bt1MLD = self.crosscoders[0].forward_train(single_tok_Bt1MLD)
-        # res1_BTMLD = rearrange(res1_Bt1MLD.reconstructed_acts_BTMLD, '(b t) 1 m l d -> b t m l d', t=2)
-        output_tok1 = self.crosscoder1.forward_train(x_BTMLD[:, 0][:, None])
-        output_tok2 = self.crosscoder1.forward_train(x_BTMLD[:, 1][:, None])
-        output_both = self.crosscoder2.forward_train(x_BTMLD)
+        output_tok1 = self.single_cc.forward_train(x_BTLD[:, 0][:, None])
+        output_tok2 = self.single_cc.forward_train(x_BTLD[:, 1][:, None])
+        output_both = self.double_cc.forward_train(x_BTLD)
 
         return self.TrainResult(
-            tok1_recon_B1MLD=output_tok1.reconstructed_acts_BTMLD,
-            tok2_recon_B1MLD=output_tok2.reconstructed_acts_BTMLD,
+            tok1_recon_B1LD=output_tok1.reconstructed_acts_BXD,
+            tok2_recon_B1LD=output_tok2.reconstructed_acts_BXD,
             tok1_hidden_BH=output_tok1.hidden_BH,
             tok2_hidden_BH=output_tok2.hidden_BH,
-            both_recon_B2MLD=output_both.reconstructed_acts_BTMLD,
+            both_recon_B2LD=output_both.reconstructed_acts_BXD,
             both_hidden_BH=output_both.hidden_BH,
         )
 
-    def forward(self, x_BTMLD: t.Tensor) -> t.Tensor:
+    def forward(self, x_BTLD: t.Tensor) -> t.Tensor:
         return t.Tensor(0)
 
 
-class SlidingWindowCrosscoderTrainer(BaseTrainer[Any, Any]):
+class SlidingWindowCrosscoderTrainer:
     def __init__(
         self,
         cfg: JanUpdateTrainConfig,
-        activations_dataloader: BaseActivationsDataloader,
+        activations_dataloader: BaseTokenLayerActivationsDataloader,
         crosscoders: BiTokenCCWrapper,
         wandb_run: Run | None,
         device: t.device,
@@ -83,7 +83,6 @@ class SlidingWindowCrosscoderTrainer(BaseTrainer[Any, Any]):
     ):
         self.cfg = cfg
         self.activations_dataloader = activations_dataloader
-        # self.crosscoders = crosscoders
         self.wandb_run = wandb_run
         self.device = device
         self.layers_to_harvest = layers_to_harvest
@@ -93,7 +92,7 @@ class SlidingWindowCrosscoderTrainer(BaseTrainer[Any, Any]):
         self.optimizer = build_optimizer(cfg.optimizer, self.crosscoders.parameters())
 
         self.num_steps_per_epoch = validate_num_steps_per_epoch(
-            cfg.epochs, cfg.num_steps_per_epoch, cfg.num_steps, activations_dataloader
+            cfg.epochs, cfg.num_steps_per_epoch, cfg.num_steps, activations_dataloader.num_batches()
         )
 
         self.total_steps = self.num_steps_per_epoch * (cfg.epochs or 1)
@@ -114,13 +113,13 @@ class SlidingWindowCrosscoderTrainer(BaseTrainer[Any, Any]):
         save_config(self.cfg, self.save_dir)
 
         for _ in range(self.cfg.epochs or 1):
-            epoch_dataloader = self.activations_dataloader.get_shuffled_activations_iterator()
-            epoch_dataloader = islice(epoch_dataloader, self.num_steps_per_epoch)
+            epoch_dataloader_BTLD = self.activations_dataloader.get_shuffled_activations_iterator_BTLD()
+            epoch_dataloader_BTLD = islice(epoch_dataloader_BTLD, self.num_steps_per_epoch)
 
-            for example_BX in epoch_dataloader:
-                batch_BX = example_BX.to(self.device)
+            for batch_BTLD in epoch_dataloader_BTLD:
+                batch_BTLD = batch_BTLD.to(self.device)
 
-                train_result_dict = self._train_step(batch_BX)
+                self._train_step(batch_BTLD)
 
                 # TODO(oli): get wandb checkpoint saving working
 
@@ -132,27 +131,27 @@ class SlidingWindowCrosscoderTrainer(BaseTrainer[Any, Any]):
                 #             save_model(crosscoder, self.save_dir / f"crosscoder{i}", self.epoch, self.step)
 
                 if self.epoch == 0:
-                    self.unique_tokens_trained += batch_BX.shape[0]
+                    self.unique_tokens_trained += batch_BTLD.shape[0]
 
                 self.step += 1
             self.epoch += 1
 
-    def _train_step(self, batch_BX: t.Tensor):
+    def _train_step(self, batch_BTLD: t.Tensor) -> None:
         self.optimizer.zero_grad()
 
         # fwd
-        res = self.crosscoders.forward_train(batch_BX)
+        res = self.crosscoders.forward_train(batch_BTLD)
 
-        reconstructed_acts_BTMLD = t.cat([res.tok1_recon_B1MLD, res.tok2_recon_B1MLD], dim=1) + res.both_recon_B2MLD
-        assert reconstructed_acts_BTMLD.shape == batch_BX.shape, "fuck"
+        reconstructed_acts_BTLD = t.cat([res.tok1_recon_B1LD, res.tok2_recon_B1LD], dim=1) + res.both_recon_B2LD
+        assert reconstructed_acts_BTLD.shape == batch_BTLD.shape, "fuck"
 
         # losses
-        reconstruction_loss = calculate_reconstruction_loss(batch_BX, reconstructed_acts_BTMLD)
+        reconstruction_loss = calculate_reconstruction_loss(batch_BTLD, reconstructed_acts_BTLD)
 
         hidden_B3H = t.cat([res.tok1_hidden_BH, res.both_hidden_BH, res.tok2_hidden_BH], dim=-1)
 
-        decoder_norms_single_H = get_decoder_norms_H(self.crosscoders.crosscoder1.W_dec_HTMLD)
-        decoder_norms_both_H = get_decoder_norms_H(self.crosscoders.crosscoder2.W_dec_HTMLD)
+        decoder_norms_single_H = get_decoder_norms_H(self.crosscoders.single_cc.W_dec_HXD)
+        decoder_norms_both_H = get_decoder_norms_H(self.crosscoders.double_cc.W_dec_HXD)
 
         decoder_norms_3H = t.cat([decoder_norms_single_H, decoder_norms_both_H, decoder_norms_single_H], dim=-1)
 
@@ -177,29 +176,37 @@ class SlidingWindowCrosscoderTrainer(BaseTrainer[Any, Any]):
         assert len(self.optimizer.param_groups) == 1, "sanity check failed"
         self.optimizer.param_groups[0]["lr"] = self.lr_scheduler(self.step)
 
-        if self.cfg.log_every_n_steps and self.step % self.cfg.log_every_n_steps == 0:
-            # metrics
+        if (
+            self.cfg.log_every_n_steps is not None
+            and self.step % self.cfg.log_every_n_steps == 0
+            and self.wandb_run is not None
+        ):
             mean_l0 = l0_norm(hidden_B3H, dim=-1).mean()
-            explained_variance_TML = calculate_explained_variance_TML(batch_BX, reconstructed_acts_BTMLD)
 
             thresholds_single_H = (
-                self.crosscoders.crosscoder1.hidden_activation.log_threshold_H.exp().detach().cpu().numpy().tolist()
+                self.crosscoders.single_cc.hidden_activation.log_threshold_H.exp().detach().cpu().numpy().tolist()
             )
             thresholds_both_H = (
-                self.crosscoders.crosscoder2.hidden_activation.log_threshold_H.exp().detach().cpu().numpy().tolist()
+                self.crosscoders.double_cc.hidden_activation.log_threshold_H.exp().detach().cpu().numpy().tolist()
             )
 
             thresholds_single_hist = wandb.Histogram(sequence=thresholds_single_H, num_bins=100)
             thresholds_both_hist = wandb.Histogram(sequence=thresholds_both_H, num_bins=100)
 
             # with t.no_grad():
-            # cc1_pre_biases_BH = einsum(batch_BX, self.crosscoders.crosscoder1.W_enc_TMLDH, "b t m l d, t m l d h -> b h")
+            # cc1_pre_biases_BH = einsum(batch_BTLD, self.crosscoders.crosscoder1.W_enc_TLDH, "b t m l d, t m l d h -> b h")
             # cc1_pre_biases_hist = wandb.Histogram(sequence=cc1_pre_biases_BH.flatten().detach().cpu().numpy().tolist(), num_bins=100)
 
-            # cc2_pre_biases_BH = einsum(batch_BX, self.crosscoders.crosscoder2.W_enc_TMLDH, "b t m l d, t m l d h -> b h")
+            # cc2_pre_biases_BH = einsum(batch_BTLD, self.crosscoders.crosscoder2.W_enc_TLDH, "b t m l d, t m l d h -> b h")
             # cc2_pre_biases_hist = wandb.Histogram(sequence=cc2_pre_biases_BH.flatten().detach().cpu().numpy().tolist(), num_bins=100)
 
             # activations_hist = wandb.Histogram(sequence=hidden_B3H.flatten().detach().cpu().numpy().tolist(), num_bins=100)
+
+            explained_variance_dict = get_explained_var_dict(
+                calculate_explained_variance_X(batch_BTLD, reconstructed_acts_BTLD),
+                ("token", [0, 1]),
+                ("layer", self.layers_to_harvest),
+            )
 
             log_dict: dict[str, Any] = {
                 "train/reconstruction_loss": reconstruction_loss.item(),
@@ -217,33 +224,17 @@ class SlidingWindowCrosscoderTrainer(BaseTrainer[Any, Any]):
                 #
                 "train/loss": loss.item(),
                 #
-                **get_explained_var_dict(explained_variance_TML, self.layers_to_harvest),
+                **explained_variance_dict,
                 #
                 "media/jumprelu_threshold_distribution_single": thresholds_single_hist,
                 "media/jumprelu_threshold_distribution_both": thresholds_both_hist,
                 # "media/pre_bias_distribution": pre_biases_hist,
+                "train/epoch": self.epoch,
+                "train/unique_tokens_trained": self.unique_tokens_trained,
+                "train/learning_rate": self.optimizer.param_groups[0]["lr"],
             }
 
-            if self.wandb_run is not None:
-                log_dict: dict[str, Any] = {
-                    **log_dict,
-                    "train/epoch": self.epoch,
-                    "train/unique_tokens_trained": self.unique_tokens_trained,
-                    "train/learning_rate": self.optimizer.param_groups[0]["lr"],
-                }
-
-                # if self.crosscoder.n_models == 2 and self.crosscoder.n_tokens == 1:
-                #     hist_data = create_cosine_sim_and_relative_norm_histogram_data(
-                #         self.crosscoder.W_dec_HTMLD.detach().cpu(), self.layers_to_harvest
-                #     )
-                #     log_dict.update(
-                #         {
-                #             f"media/{name}": wandb.Histogram(sequence=data, num_bins=100)
-                #             for name, data in hist_data.items()
-                #         }
-                #     )
-
-                self.wandb_run.log(log_dict, step=self.step)
+            self.wandb_run.log(log_dict, step=self.step)
 
     def _lambda_s_scheduler(self) -> float:
         """linear ramp from 0 to lambda_s over the course of training"""
@@ -256,9 +247,9 @@ class SlidingWindowCrosscoderTrainer(BaseTrainer[Any, Any]):
     def _pre_act_loss(self, hidden_B3H: t.Tensor, decoder_norms_3H: t.Tensor) -> t.Tensor:
         t_3H = t.cat(
             [
-                self.crosscoders.crosscoder1.hidden_activation.log_threshold_H,
-                self.crosscoders.crosscoder2.hidden_activation.log_threshold_H,
-                self.crosscoders.crosscoder1.hidden_activation.log_threshold_H,
+                self.crosscoders.single_cc.hidden_activation.log_threshold_H,
+                self.crosscoders.double_cc.hidden_activation.log_threshold_H,
+                self.crosscoders.single_cc.hidden_activation.log_threshold_H,
             ],
             dim=-1,
         )

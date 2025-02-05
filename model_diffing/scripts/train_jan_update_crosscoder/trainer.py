@@ -1,17 +1,18 @@
 from typing import Any
 
 import numpy as np
-import plotly.express as px
-import plotly.graph_objs as go
+import plotly.express as px  # type: ignore
+import plotly.graph_objs as go  # type: ignore
 import torch as t
 import wandb
 from torch.nn.utils import clip_grad_norm_
 
+from model_diffing.analysis.visualization import create_cosine_sim_and_relative_norm_histogram_data
 from model_diffing.models.activations.jumprelu import JumpReLUActivation
-from model_diffing.scripts.base_trainer import BaseTrainer
+from model_diffing.scripts.base_trainer import BaseModelLayerTrainer
 from model_diffing.scripts.train_jan_update_crosscoder.config import JanUpdateTrainConfig
 from model_diffing.utils import (
-    calculate_explained_variance_TML,
+    calculate_explained_variance_X,
     calculate_reconstruction_loss,
     get_decoder_norms_H,
     get_explained_var_dict,
@@ -19,17 +20,17 @@ from model_diffing.utils import (
 )
 
 
-class JanUpdateCrosscoderTrainer(BaseTrainer[JanUpdateTrainConfig, JumpReLUActivation]):
-    def _train_step(self, batch_BX: t.Tensor) -> dict[str, float]:
+class JanUpdateCrosscoderTrainer(BaseModelLayerTrainer[JanUpdateTrainConfig, JumpReLUActivation]):
+    def _train_step(self, batch_BMLD: t.Tensor) -> None:
         self.optimizer.zero_grad()
 
         # fwd
-        train_res = self.crosscoder.forward_train(batch_BX)
+        train_res = self.crosscoder.forward_train(batch_BMLD)
 
         # losses
-        reconstruction_loss = calculate_reconstruction_loss(batch_BX, train_res.reconstructed_acts_BTMLD)
+        reconstruction_loss = calculate_reconstruction_loss(batch_BMLD, train_res.reconstructed_acts_BXD)
 
-        decoder_norms_H = get_decoder_norms_H(self.crosscoder.W_dec_HTMLD)
+        decoder_norms_H = get_decoder_norms_H(self.crosscoder.W_dec_HXD)
         tanh_sparsity_loss = self._tanh_sparsity_loss(train_res.hidden_BH, decoder_norms_H)
         pre_act_loss = self._pre_act_loss(train_res.hidden_BH, decoder_norms_H)
 
@@ -47,39 +48,59 @@ class JanUpdateCrosscoderTrainer(BaseTrainer[JanUpdateTrainConfig, JumpReLUActiv
         loss.backward()
         clip_grad_norm_(self.crosscoder.parameters(), 1.0)
         self.optimizer.step()
-
         assert len(self.optimizer.param_groups) == 1, "sanity check failed"
         self.optimizer.param_groups[0]["lr"] = self.lr_scheduler(self.step)
 
-        # metrics
-        mean_l0 = l0_norm(train_res.hidden_BH, dim=-1).mean()
-        explained_variance_TML = calculate_explained_variance_TML(batch_BX, train_res.reconstructed_acts_BTMLD)
+        if (
+            self.wandb_run is not None
+            and self.cfg.save_every_n_steps is not None
+            and self.step % self.cfg.save_every_n_steps == 0
+        ):
+            mean_l0 = l0_norm(train_res.hidden_BH, dim=-1).mean()
+            explained_variance_ML = calculate_explained_variance_X(batch_BMLD, train_res.reconstructed_acts_BXD)
 
-        thresholds_H = self.crosscoder.hidden_activation.log_threshold_H.exp().detach().cpu().numpy().tolist()
-        thresholds_hist = wandb.Histogram(sequence=thresholds_H, num_bins=100)
+            thresholds_H = self.crosscoder.hidden_activation.log_threshold_H.exp().detach().cpu().numpy().tolist()
+            thresholds_hist = wandb.Histogram(sequence=thresholds_H, num_bins=100)
 
-        log_dict: dict[str, Any] = {
-            "train/reconstruction_loss": reconstruction_loss.item(),
-            #
-            "train/tanh_sparsity_loss": tanh_sparsity_loss.item(),
-            "train/tanh_sparsity_loss_scaled": scaled_tanh_sparsity_loss.item(),
-            "train/lambda_s": lambda_s,
-            #
-            "train/mean_l0": mean_l0.item(),
-            "train/mean_l0_pct": mean_l0.item() / self.crosscoder.hidden_dim,
-            #
-            "train/pre_act_loss": pre_act_loss.item(),
-            "train/pre_act_loss_scaled": scaled_pre_act_loss.item(),
-            "train/lambda_p": self.cfg.lambda_p,
-            #
-            "train/loss": loss.item(),
-            #
-            **get_explained_var_dict(explained_variance_TML, self.layers_to_harvest),
-            #
-            "media/jumprelu_threshold_distribution": thresholds_hist,
-        }
+            explained_variance_dict = get_explained_var_dict(
+                explained_variance_ML,
+                ("model", list(range(self.n_models))),
+                ("layer", self.layers_to_harvest),
+            )
 
-        return log_dict
+            log_dict: dict[str, Any] = {
+                "train/reconstruction_loss": reconstruction_loss.item(),
+                #
+                "train/tanh_sparsity_loss": tanh_sparsity_loss.item(),
+                "train/tanh_sparsity_loss_scaled": scaled_tanh_sparsity_loss.item(),
+                "train/lambda_s": lambda_s,
+                #
+                "train/mean_l0": mean_l0.item(),
+                "train/mean_l0_pct": mean_l0.item() / self.crosscoder.hidden_dim,
+                #
+                "train/pre_act_loss": pre_act_loss.item(),
+                "train/pre_act_loss_scaled": scaled_pre_act_loss.item(),
+                "train/lambda_p": self.cfg.lambda_p,
+                #
+                "train/loss": loss.item(),
+                #
+                "media/jumprelu_threshold_distribution": thresholds_hist,
+                #
+                **explained_variance_dict,
+            }
+
+            if self.n_models == 2:
+                W_dec_HXD = self.crosscoder.W_dec_HXD.detach().cpu()
+                assert W_dec_HXD.shape[1:-1] == (self.n_models, self.n_layers)
+                hist_data = create_cosine_sim_and_relative_norm_histogram_data(
+                    W_dec_HMLD=W_dec_HXD,
+                    layers=self.layers_to_harvest,
+                )
+                log_dict.update(
+                    {f"media/{name}": wandb.Histogram(sequence=data, num_bins=100) for name, data in hist_data.items()}
+                )
+
+            self.wandb_run.log(log_dict, step=self.step)
 
     def _lambda_s_scheduler(self) -> float:
         """linear ramp from 0 to lambda_s over the course of training"""

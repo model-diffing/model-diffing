@@ -1,5 +1,5 @@
-from model_diffing.dataloader.activations import ActivationsHarvester, ScaledActivationsDataloader
-from model_diffing.dataloader.token_loader import ToyOverfittingTokenSequenceLoader
+from model_diffing.data.model_layer_dataloader import ActivationsHarvester, ScaledModelLayerActivationsDataloader
+from model_diffing.data.token_loader import ToyOverfittingTokenSequenceLoader
 from model_diffing.scripts.config_common import LLMConfig
 from model_diffing.scripts.llms import build_llms
 from model_diffing.utils import get_device
@@ -32,7 +32,7 @@ def test():
         layer_indices_to_harvest=layer_indices_to_harvest,
     )
 
-    dataloader = ScaledActivationsDataloader(
+    dataloader = ScaledModelLayerActivationsDataloader(
         activations_harvester=activations_harvester,
         activations_shuffle_buffer_size=training_batch_size * 4,
         token_sequence_loader=sequence_loader,
@@ -41,6 +41,6 @@ def test():
         n_batches_for_norm_estimate=1,
     )
 
-    sample_activations_batch = next(dataloader.get_shuffled_activations_iterator())
+    sample_activations_batch = next(dataloader.get_shuffled_activations_iterator_BMLD())
     harvested_activation_expected_shape_MLD = (training_batch_size, len(llms), len(layer_indices_to_harvest), d_model)
     assert sample_activations_batch.shape == harvested_activation_expected_shape_MLD

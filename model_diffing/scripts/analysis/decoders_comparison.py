@@ -23,9 +23,10 @@ state_dict["is_folded"] = torch.tensor(True, dtype=torch.bool)
 state_dict["folded_scaling_factors_ML"]
 # %%
 
+n_models = 2
+n_layers = 4
 cc = crosscoder.AcausalCrosscoder(
-    n_models=2,
-    n_layers=4,
+    crosscoding_dims=(n_models, n_layers),
     d_model=768,
     hidden_dim=32_768,
     dec_init_norm=0.1,
@@ -35,9 +36,10 @@ cc.load_state_dict(state_dict)
 
 
 def vis(cc: crosscoder.AcausalCrosscoder[Any]):
-    for layer_idx in range(cc.W_dec_HMLD.shape[2]):
-        W_dec_a_HD = cc.W_dec_HMLD[:, 0, layer_idx]
-        W_dec_b_HD = cc.W_dec_HMLD[:, 1, layer_idx]
+    n_models, n_layers = cc.crosscoding_dims
+    for layer_idx in range(n_layers):
+        W_dec_a_HD = cc.W_dec_HXD[:, 0, layer_idx]
+        W_dec_b_HD = cc.W_dec_HXD[:, 1, layer_idx]
 
         relative_norms = metrics.compute_relative_norms_N(W_dec_a_HD, W_dec_b_HD)
         fig = visualization.relative_norms_hist(relative_norms)

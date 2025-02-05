@@ -1,4 +1,4 @@
-from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainConfig
+from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainConfig, DataConfig
 from model_diffing.utils import BaseModel
 
 
@@ -23,5 +23,6 @@ class JanUpdateTrainConfig(BaseTrainConfig):
 
 
 class JanUpdateExperimentConfig(BaseExperimentConfig):
+    data: DataConfig
     crosscoder: JanUpdateCrosscoderConfig
     train: JanUpdateTrainConfig

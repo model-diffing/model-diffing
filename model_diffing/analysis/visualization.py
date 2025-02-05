@@ -1,36 +1,42 @@
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objs as go
+from typing import cast
+
+import pandas as pd  # type: ignore
+import plotly.express as px  # type: ignore
+import plotly.graph_objs as go  # type: ignore
 import torch
-from plotly.subplots import make_subplots
+from plotly.subplots import make_subplots  # type: ignore
 
 from model_diffing.analysis import metrics
 
 
 def create_cosine_sim_and_relative_norm_histogram_data(
-    W_dec_HTMLD: torch.Tensor,
+    W_dec_HMLD: torch.Tensor,
     layers: list[int],
 ) -> dict[str, list[float]]:
-    if W_dec_HTMLD.shape[1] != 1:
-        raise ValueError("only works for single token")
-    if W_dec_HTMLD.shape[2] != 2:
-        raise ValueError(f"W_dec_HTMLD.shape[1] != 2. shape: {W_dec_HTMLD.shape}")
+    _, n_models, num_layers, _ = W_dec_HMLD.shape
+    assert n_models == 2, "only works for 2 models"
 
-    _, _, num_layers, _ = W_dec_HTMLD.shape
-
-    plots = {}
+    plots: dict[str, list[float]] = {}
     for layer_idx in range(num_layers):
         layer_name = layers[layer_idx]  # layer_idx is the index into the list of layers we're collecting
-        W_dec_a_HD = W_dec_HTMLD[:, 0, layer_idx]
-        W_dec_b_HD = W_dec_HTMLD[:, 1, layer_idx]
+        W_dec_a_HD = W_dec_HMLD[:, 0, layer_idx]
+        W_dec_b_HD = W_dec_HMLD[:, 1, layer_idx]
 
         relative_norms = metrics.compute_relative_norms_N(W_dec_a_HD, W_dec_b_HD)
-        plots[f"relative_decoder_norms_layer_{layer_name}"] = relative_norms.detach().cpu().numpy().tolist()
+        rel_vals = relative_norms.detach().cpu().numpy().tolist()
+        assert isinstance(rel_vals, list)
+        assert isinstance(rel_vals[0], float)
+
+        plots[f"relative_decoder_norms_layer_{layer_name}"] = cast(list[float], rel_vals)
 
         shared_latent_mask = metrics.get_shared_latent_mask(relative_norms)
         cosine_sims = metrics.compute_cosine_similarities_N(W_dec_a_HD, W_dec_b_HD)
         shared_features_cosine_sims = cosine_sims[shared_latent_mask]
-        plots[f"cosine_sim_layer_{layer_name}"] = shared_features_cosine_sims.detach().cpu().numpy().tolist()
+        shared_features_cosine_sims_vals = shared_features_cosine_sims.detach().cpu().numpy().tolist()
+        assert isinstance(shared_features_cosine_sims_vals, list)
+        assert isinstance(shared_features_cosine_sims_vals[0], float)
+
+        plots[f"cosine_sim_layer_{layer_name}"] = cast(list[float], shared_features_cosine_sims_vals)
 
     return plots
 

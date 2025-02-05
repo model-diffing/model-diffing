@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import fire
+import fire  # type: ignore
 import wandb
 
 from model_diffing.log import logger

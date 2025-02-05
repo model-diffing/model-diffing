@@ -3,10 +3,9 @@ import os
 import fire  # type: ignore
 import torch
 from einops import rearrange
-from tqdm import tqdm
+from tqdm import tqdm  # type: ignore
 
-from model_diffing.dataloader.activations import BaseActivationsDataloader
-from model_diffing.dataloader.data import build_dataloader
+from model_diffing.data.model_layer_dataloader import BaseModelLayerActivationsDataloader, build_dataloader
 from model_diffing.log import logger
 from model_diffing.models.activations import JumpReLUActivation
 from model_diffing.models.crosscoder import AcausalCrosscoder
@@ -21,10 +20,9 @@ def build_jan_update_crosscoder_trainer(cfg: JanUpdateExperimentConfig) -> JanUp
     device = get_device()
 
     dataloader = build_dataloader(cfg.data, cfg.train.batch_size, cfg.cache_dir, device)
-    _, n_layers, n_models, d_model = dataloader.batch_shape()
+    _, n_layers, n_models, d_model = dataloader.batch_shape_BMLD()
 
     crosscoder = _build_jan_update_crosscoder(
-        n_tokens=1,
         n_models=n_models,
         n_layers=n_layers,
         d_model=d_model,
@@ -49,19 +47,16 @@ def build_jan_update_crosscoder_trainer(cfg: JanUpdateExperimentConfig) -> JanUp
 
 
 def _build_jan_update_crosscoder(
-    n_tokens: int,
     n_models: int,
     n_layers: int,
     d_model: int,
     cc_hidden_dim: int,
     jumprelu: JumpReLUConfig,
-    data_loader: BaseActivationsDataloader,
+    data_loader: BaseModelLayerActivationsDataloader,
     device: torch.device,  # for computing b_enc
 ) -> AcausalCrosscoder[JumpReLUActivation]:
     cc = AcausalCrosscoder(
-        n_tokens=n_tokens,
-        n_models=n_models,
-        n_layers=n_layers,
+        crosscoding_dims=(n_models, n_layers),
         d_model=d_model,
         hidden_dim=cc_hidden_dim,
         dec_init_norm=0,  # dec_init_norm doesn't matter here as we override weights below
@@ -82,18 +77,19 @@ def _build_jan_update_crosscoder(
         m = float(cc_hidden_dim)  # m is the size of the hidden space
 
         # W_dec ~ U(-1/n, 1/n) (from doc)
-        cc.W_dec_HMLD.uniform_(-1.0 / n, 1.0 / n)
+        cc.W_dec_HXD.uniform_(-1.0 / n, 1.0 / n)
 
         # For now, assume we're in the X == Y case.
         # Therefore W_enc = (n/m) * W_dec^T
-        cc.W_enc_MLDH.copy_(
-            rearrange(cc.W_dec_HMLD, "hidden model layer d_model -> model layer d_model hidden")  #
+        cc.W_enc_XDH.copy_(
+            rearrange(cc.W_dec_HXD, "hidden ... -> ... hidden")  #
             * (n / m)
         )
 
+        raise ValueError("need to fix this: 10000/m, not 1/10000")
         calibrated_b_enc_H = _compute_b_enc_H(
             data_loader,
-            cc.W_enc_MLDH,
+            cc.W_enc_XDH,
             cc.hidden_activation.log_threshold_H.exp(),
             device,
             n_examples_to_sample=50_000,
@@ -108,7 +104,7 @@ def _build_jan_update_crosscoder(
 
 
 def _compute_b_enc_H(
-    data_loader: BaseActivationsDataloader,
+    data_loader: BaseModelLayerActivationsDataloader,
     W_enc_MLDH: torch.Tensor,
     initial_jumprelu_threshold_H: torch.Tensor,
     device: torch.device,
@@ -133,12 +129,12 @@ def _compute_b_enc_H(
 
 
 def _harvest_pre_bias_NH(
-    data_loader: BaseActivationsDataloader,
+    data_loader: BaseModelLayerActivationsDataloader,
     W_enc_MLDH: torch.Tensor,
     device: torch.device,
     n_examples_to_sample: int,
 ) -> torch.Tensor:
-    batch_size = data_loader.batch_shape()[0]
+    batch_size = data_loader.batch_shape_BMLD()[0]
 
     remainder = n_examples_to_sample % batch_size
     if remainder != 0:
@@ -153,7 +149,7 @@ def _harvest_pre_bias_NH(
 
     num_batches = n_examples_to_sample // batch_size
 
-    activations_iterator_BMLD = data_loader.get_shuffled_activations_iterator()
+    activations_iterator_BMLD = data_loader.get_shuffled_activations_iterator_BMLD()
 
     def get_batch_pre_bias() -> torch.Tensor:
         # this is essentially the first step of the crosscoder forward pass, but not worth

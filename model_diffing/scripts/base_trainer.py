@@ -5,12 +5,11 @@ from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 import torch
-import wandb
-import yaml
+
+import yaml  # type: ignore
 from wandb.sdk.wandb_run import Run
 
-from model_diffing.analysis.visualization import create_cosine_sim_and_relative_norm_histogram_data
-from model_diffing.dataloader.activations import BaseActivationsDataloader
+from model_diffing.data.model_layer_dataloader import BaseModelLayerActivationsDataloader
 from model_diffing.log import logger
 from model_diffing.models.crosscoder import AcausalCrosscoder
 from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainConfig
@@ -36,11 +35,11 @@ TAct = TypeVar("TAct", bound=SaveableModule)
 # TDataLoader = TypeVar("TDataLoader", bound=BaseActivationsDataloader)
 
 
-class BaseTrainer(Generic[TConfig, TAct]):
+class BaseModelLayerTrainer(Generic[TConfig, TAct]):
     def __init__(
         self,
         cfg: TConfig,
-        activations_dataloader: BaseActivationsDataloader,
+        activations_dataloader: BaseModelLayerActivationsDataloader,
         crosscoder: AcausalCrosscoder[TAct],
         wandb_run: Run | None,
         device: torch.device,
@@ -49,6 +48,12 @@ class BaseTrainer(Generic[TConfig, TAct]):
     ):
         self.cfg = cfg
         self.activations_dataloader = activations_dataloader
+
+        assert len(crosscoder.crosscoding_dims) == 2, (
+            "crosscoder must have 2 crosscoding dimensions (model, layer). (They can be singleton dimensions)"
+        )
+        self.n_models, self.n_layers = crosscoder.crosscoding_dims
+
         self.crosscoder = crosscoder
         self.wandb_run = wandb_run
         self.device = device
@@ -57,7 +62,7 @@ class BaseTrainer(Generic[TConfig, TAct]):
         self.optimizer = build_optimizer(cfg.optimizer, crosscoder.parameters())
 
         self.num_steps_per_epoch = validate_num_steps_per_epoch(
-            cfg.epochs, cfg.num_steps_per_epoch, cfg.num_steps, activations_dataloader
+            cfg.epochs, cfg.num_steps_per_epoch, cfg.num_steps, activations_dataloader.num_batches()
         )
 
         self.total_steps = self.num_steps_per_epoch * (cfg.epochs or 1)
@@ -74,41 +79,16 @@ class BaseTrainer(Generic[TConfig, TAct]):
         self.epoch = 0
         self.unique_tokens_trained = 0
 
-    def train(self):
+    def train(self) -> None:
         save_config(self.cfg, self.save_dir)
         for _ in range(self.cfg.epochs or 1):
-            epoch_dataloader = self.activations_dataloader.get_shuffled_activations_iterator()
-            epoch_dataloader = islice(epoch_dataloader, self.num_steps_per_epoch)
+            epoch_dataloader_BMLD = self.activations_dataloader.get_shuffled_activations_iterator_BMLD()
+            epoch_dataloader_BMLD = islice(epoch_dataloader_BMLD, self.num_steps_per_epoch)
 
-            for example_BX in epoch_dataloader:
-                batch_BX = example_BX.to(self.device)
+            for batch_BMLD in epoch_dataloader_BMLD:
+                batch_BMLD = batch_BMLD.to(self.device)
 
-                train_result_dict = self._train_step(batch_BX)
-
-                if (
-                    self.wandb_run is not None
-                    and self.cfg.log_every_n_steps is not None
-                    and self.step % self.cfg.log_every_n_steps == 0
-                ):
-                    log_dict: dict[str, Any] = {
-                        **train_result_dict,
-                        "train/epoch": self.epoch,
-                        "train/unique_tokens_trained": self.unique_tokens_trained,
-                        "train/learning_rate": self.optimizer.param_groups[0]["lr"],
-                    }
-
-                    if self.crosscoder.n_models == 2 and self.crosscoder.n_tokens == 1:
-                        hist_data = create_cosine_sim_and_relative_norm_histogram_data(
-                            self.crosscoder.W_dec_HTMLD.detach().cpu(), self.layers_to_harvest
-                        )
-                        log_dict.update(
-                            {
-                                f"media/{name}": wandb.Histogram(sequence=data, num_bins=100)
-                                for name, data in hist_data.items()
-                            }
-                        )
-
-                    self.wandb_run.log(log_dict, step=self.step)
+                self._train_step(batch_BMLD)
 
                 # TODO(oli): get wandb checkpoint saving working
 
@@ -119,26 +99,25 @@ class BaseTrainer(Generic[TConfig, TAct]):
                         save_model(self.crosscoder, self.save_dir, self.epoch, self.step)
 
                 if self.epoch == 0:
-                    self.unique_tokens_trained += batch_BX.shape[0]
+                    self.unique_tokens_trained += batch_BMLD.shape[0]
 
                 self.step += 1
             self.epoch += 1
 
     @abstractmethod
-    def _train_step(self, batch_BX: torch.Tensor) -> dict[str, float]: ...
+    def _train_step(self, batch_BMLD: torch.Tensor) -> None: ...
 
 
 def validate_num_steps_per_epoch(
     epochs: int | None,
     num_steps_per_epoch: int | None,
     num_steps: int | None,
-    activations_dataloader: BaseActivationsDataloader,
+    dataloader_num_batches: int | None,
 ) -> int:
     if epochs is not None:
         if num_steps is not None:
             raise ValueError("num_steps must not be provided if using epochs")
 
-        dataloader_num_batches = activations_dataloader.num_batches()
         if dataloader_num_batches is None:
             raise ValueError(
                 "activations_dataloader must have a length if using epochs, "
@@ -167,10 +146,8 @@ def validate_num_steps_per_epoch(
 
 
 TCfg = TypeVar("TCfg", bound=BaseExperimentConfig)
-TTrainer = TypeVar("TTrainer", bound=BaseTrainer[Any, Any])
 
-
-def run_exp(build_trainer: Callable[[TCfg], TTrainer], cfg_cls: type[TCfg]) -> Callable[[Path], None]:
+def run_exp(build_trainer: Callable[[TCfg], Any], cfg_cls: type[TCfg]) -> Callable[[Path], None]:
     def inner(config_path: Path) -> None:
         config_path = Path(config_path)
         assert config_path.suffix == ".yaml", f"Config file {config_path} must be a YAML file."

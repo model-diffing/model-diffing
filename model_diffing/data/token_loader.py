@@ -1,3 +1,4 @@
+
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from typing import Any, cast
@@ -6,7 +7,8 @@ import torch
 from datasets import load_dataset  # type: ignore
 from transformers import PreTrainedTokenizerBase  # type: ignore
 
-from model_diffing.dataloader.shuffle import batch_shuffle_tensor_iterator_BX
+from model_diffing.data.shuffle import batch_shuffle_tensor_iterator_BX
+from model_diffing.scripts.config_common import SequenceIteratorConfig
 
 
 class TokenSequenceLoader(ABC):
@@ -127,33 +129,51 @@ class ConnorGemma2TokenSequenceLoader(TokenSequenceLoader):
         return self.N_ROWS // self._batch_size
 
 
-# For example, we could do:
-# class LocalDatasetTokenSequenceIterator(TokenSequenceIterator):
-#     """backed by a file"""
-#     ...
+def build_tokens_sequence_loader(
+    cfg: SequenceIteratorConfig,
+    cache_dir: str,
+    tokenizer: PreTrainedTokenizerBase,
+    batch_size: int,
+) -> TokenSequenceLoader:
+    if cfg.classname == "HuggingfaceTextDatasetTokenSequenceLoader":
+        if cfg.kwargs is None:
+            raise ValueError("kwargs must be provided")
+        return HuggingfaceTextDatasetTokenSequenceLoader(
+            cache_dir=cache_dir,
+            tokenizer=tokenizer,
+            batch_size=batch_size,
+            hf_dataset_name=cfg.kwargs["hf_dataset_name"],
+            sequence_length=cfg.kwargs["sequence_length"],
+            shuffle_buffer_size=cfg.kwargs["shuffle_buffer_size"],
+        )
+    elif cfg.classname == "ConnorGemma2TokenSequenceLoader":
+        return ConnorGemma2TokenSequenceLoader(
+            cache_dir=cache_dir,
+            batch_size=batch_size,
+        )
+    elif cfg.classname == "ToyOverfittingTokenSequenceLoader":
+        if cfg.kwargs is None:
+            raise ValueError("kwargs must be provided")
+        return ToyOverfittingTokenSequenceLoader(
+            batch_size=batch_size,
+            **cfg.kwargs,
+        )
 
-# or
-
-# class MemoryTokenSequenceIterator(TokenSequenceLoader):
-#     def __init__(self, tokens_AS: torch.Tensor):
-#         self.tokens_AS = tokens_AS
-
-#     def __iter__(self) -> Iterator[torch.Tensor]:
-#         return iter(self.tokens_AS)
+    raise ValueError(f"Unknown tokens sequence iterator config name: {cfg}")
 
 
-if __name__ == "__main__":
-    from itertools import islice
+# if __name__ == "__main__":
+#     from itertools import islice
 
-    from transformers import AutoTokenizer
+#     from transformers import AutoTokenizer
 
-    token_loader = HuggingfaceTextDatasetTokenSequenceLoader(
-        hf_dataset_name=THE_PILE_UNCOPYRIGHTED_HF_DATASET,
-        tokenizer=AutoTokenizer.from_pretrained("EleutherAI/pythia-160m"),
-        cache_dir=".cache",
-        batch_size=16,
-        sequence_length=1024,
-        shuffle_buffer_size=2**14,  # 16k
-    )
-    for tokens in islice(token_loader.get_sequences_batch_iterator(), 10):
-        print(tokens.shape)
+#     token_loader = HuggingfaceTextDatasetTokenSequenceLoader(
+#         hf_dataset_name=THE_PILE_UNCOPYRIGHTED_HF_DATASET,
+#         tokenizer=AutoTokenizer.from_pretrained("EleutherAI/pythia-160m"),
+#         cache_dir=".cache",
+#         batch_size=16,
+#         sequence_length=1024,
+#         shuffle_buffer_size=2**14,  # 16k
+#     )
+#     for tokens in islice(token_loader.get_sequences_batch_iterator(), 10):
+#         print(tokens.shape)

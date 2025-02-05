@@ -1,6 +1,6 @@
 import fire  # type: ignore
 
-from model_diffing.dataloader.data import build_dataloader
+from model_diffing.data.model_layer_dataloader import build_dataloader
 from model_diffing.log import logger
 from model_diffing.models.activations.relu import ReLUActivation
 from model_diffing.models.crosscoder import AcausalCrosscoder
@@ -15,11 +15,10 @@ def build_l1_crosscoder_trainer(cfg: L1ExperimentConfig) -> L1CrosscoderTrainer:
     device = get_device()
 
     dataloader = build_dataloader(cfg.data, cfg.train.batch_size, cfg.cache_dir, device)
-    (_, n_layers, n_models, d_model) = dataloader.batch_shape()
+    _, n_layers, n_models, d_model = dataloader.batch_shape_BMLD()
 
     crosscoder = AcausalCrosscoder(
-        n_models=n_models,
-        n_layers=n_layers,
+        crosscoding_dims=(n_models, n_layers),
         d_model=d_model,
         hidden_dim=cfg.crosscoder.hidden_dim,
         dec_init_norm=cfg.crosscoder.dec_init_norm,
