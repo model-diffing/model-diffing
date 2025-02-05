@@ -33,7 +33,7 @@ def save_model(save_dir: Path, model: nn.Module, epoch: int) -> None:
     """
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    model_file = save_dir / f"model_epoch_{epoch}.pt"
+    model_file = save_dir / f"model_epoch_{epoch+1}.pt"
     torch.save(model.state_dict(), model_file)
     logger.info("Saved model to %s", model_file)
 
