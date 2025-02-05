@@ -8,8 +8,8 @@ class L1CrosscoderConfig(BaseModel):
 
 
 class L1TrainConfig(BaseTrainConfig):
-    l1_coef_max: float = 5.0
-    l1_coef_n_steps: int = 1000
+    lambda_s_max: float = 5.0
+    lambda_s_n_steps: int = 1000
 
 
 class L1ExperimentConfig(BaseExperimentConfig):

@@ -10,8 +10,18 @@ class ActivationsHarvester:
         llms: list[HookedTransformer],
         layer_indices_to_harvest: list[int],
     ):
+        if len({llm.cfg.d_model for llm in llms}) != 1:
+            raise ValueError("All models must have the same d_model")
         self._llms = llms
         self._layer_indices_to_harvest = layer_indices_to_harvest
+
+    @property
+    def activation_shape_MLD(self) -> tuple[int, int, int]:
+        return (
+            len(self._llms),
+            len(self._layer_indices_to_harvest),
+            self._llms[0].cfg.d_model,
+        )
 
     @cached_property
     def names(self) -> list[str]:
@@ -34,11 +44,3 @@ class ActivationsHarvester:
         activations = [self._get_model_activations_BSLD(model, sequence_BS) for model in self._llms]
         activations_BSMLD = torch.stack(activations, dim=2)
         return activations_BSMLD
-
-    def activation_shape_MLD(self) -> tuple[int, int, int]:
-        return (
-            len(self._layer_indices_to_harvest),
-            len(self._llms),
-            self._llms[0].cfg.d_model,
-        )
-

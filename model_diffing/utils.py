@@ -75,21 +75,23 @@ def l2_norm(
     return torch.norm(input, p=2, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
 
 
-def _weighted_l1_sparsity_loss(
-    W_dec_HMLD: torch.Tensor,
+def weighted_l1_sparsity_loss(
+    W_dec_HTMLD: torch.Tensor,
     hidden_BH: torch.Tensor,
     layer_reduction: Reduction,  # type: ignore
     model_reduction: Reduction,  # type: ignore
+    token_reduction: Reduction,  # type: ignore
 ) -> torch.Tensor:
     assert (hidden_BH >= 0).all()
     # think about it like: each latent (called "hidden" here) has a separate projection onto each (model, layer)
     # so we have a separate l2 norm for each (hidden, model, layer)
-    W_dec_l2_norms_HML = reduce(W_dec_HMLD, "hidden model layer dim -> hidden model layer", l2_norm)
+    W_dec_l2_norms_HML = reduce(W_dec_HTMLD, "hidden token model layer dim -> hidden token model layer", l2_norm)
 
     # to get the weighting factor for each latent, we reduce it's decoder norms for each (model, layer)
     reduced_norms_H = multi_reduce(
         W_dec_l2_norms_HML,
-        "hidden model layer",
+        "hidden token model layer",
+        ("token", token_reduction),
         ("layer", layer_reduction),
         ("model", model_reduction),
     )
@@ -101,13 +103,15 @@ def _weighted_l1_sparsity_loss(
 
 
 sparsity_loss_l2_of_norms = partial(
-    _weighted_l1_sparsity_loss,
+    weighted_l1_sparsity_loss,
+    token_reduction=l2_norm,
     layer_reduction=l2_norm,
     model_reduction=l2_norm,
 )
 
 sparsity_loss_l1_of_norms = partial(
-    _weighted_l1_sparsity_loss,
+    weighted_l1_sparsity_loss,
+    token_reduction=l1_norm,
     layer_reduction=l1_norm,
     model_reduction=l1_norm,
 )
@@ -179,7 +183,7 @@ def get_explained_var_dict(
     crosscoding_dims is a list of tuples, each tuple is:
         1: the name of the crosscoding dimension ('layer', 'model', 'token', etc.)
         2: the labels of the crosscoding dimension (e.g. [0, 1, 7] or ['gpt2', 'gpt3', 'gpt4'], or ['<bos>', '-1', 'self'])
-    
+
     the reason we need the explicit naming pattern is that often indices are not helpful. For example, when training
     a crosscoder on layers 2, 5, and 8, you don't to want to have them labeled [0, 1, 2]. i.e. you need to know what
     each index means.

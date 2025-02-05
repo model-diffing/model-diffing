@@ -60,7 +60,7 @@ def _build_sliding_window_crosscoder_trainer(cfg: SlidingWindowExperimentConfig)
         raise ValueError(f"token_window_size must be 2, got {cfg.data.token_window_size}")
 
     crosscoder1, crosscoder2 = [
-        _build_crosscoder(
+        _build_jumprelu_crosscoder(
             n_tokens=window_size,
             n_layers=n_layers,
             d_model=d_model,
@@ -88,7 +88,7 @@ def _build_sliding_window_crosscoder_trainer(cfg: SlidingWindowExperimentConfig)
     )
 
 
-def _build_crosscoder(
+def _build_jumprelu_crosscoder(
     n_tokens: int,
     n_layers: int,
     d_model: int,
@@ -132,7 +132,7 @@ def _build_crosscoder(
             initial_jumprelu_threshold_H=cc.hidden_activation.log_threshold_H.exp(),
             device=device,
             n_examples_to_sample=500,  # this should be enough that the quantile is stable
-            firing_sparsity=10_000 / m,
+            firing_sparsity=min(10_000 / m, 1),
         )
         cc.b_enc_H.copy_(calibrated_b_enc_H)
 
@@ -154,7 +154,7 @@ def _compute_b_enc_H(
 
     pre_bias_NH = _harvest_pre_bias_NH(dataloader, W_enc_TLDH, device, n_examples_to_sample)
 
-    # find the threshold for each idx H such that 1/10_000 of the examples are above the threshold
+    # find the threshold for each idx H such that "firing_sparsity" of the examples are above the threshold
     quantile_H = torch.quantile(pre_bias_NH, 1 - firing_sparsity, dim=0)
 
     # firing is when the post-bias is above the jumprelu threshold therefore, we subtract

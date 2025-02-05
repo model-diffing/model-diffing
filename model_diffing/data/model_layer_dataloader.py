@@ -89,7 +89,7 @@ class ScaledModelLayerActivationsDataloader(BaseModelLayerActivationsDataloader)
     def batch_shape_BMLD(self) -> tuple[int, int, int, int]:
         return (
             self._yield_batch_size,
-            *self._activations_harvester.activation_shape_MLD(),
+            *self._activations_harvester.activation_shape_MLD,
         )
 
     def get_shuffled_activations_iterator_BMLD(self) -> Iterator[torch.Tensor]:

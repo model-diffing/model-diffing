@@ -52,11 +52,12 @@ class SlidingWindowScaledActivationsDataloader(BaseTokenLayerActivationsDataload
             n_batches_for_norm_estimate=n_batches_for_norm_estimate,
         )
 
-        activation_shape_MLD = self._activations_harvester.activation_shape_MLD()
-        assert activation_shape_MLD[0] == 1, (
-            "ActivationHarvester is configured incorrectly. Should only be harvesting for 1 model for sliding window"
-        )
-        self.activation_shape_LD = activation_shape_MLD[1:]
+        n_models, n_layers, d_model = self._activations_harvester.activation_shape_MLD
+        if n_models != 1:
+            raise ValueError(
+                "ActivationHarvester is configured incorrectly. Should only be harvesting for 1 model for sliding window"
+            )
+        self.activation_shape_LD = n_layers, d_model
 
     def get_norm_scaling_factors_TL(self) -> torch.Tensor:
         return self._norm_scaling_factors_TL
@@ -159,4 +160,3 @@ def build_sliding_window_dataloader(
     )
 
     return activations_dataloader
-

@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 import torch
-
 import yaml  # type: ignore
 from wandb.sdk.wandb_run import Run
 
@@ -146,6 +145,7 @@ def validate_num_steps_per_epoch(
 
 
 TCfg = TypeVar("TCfg", bound=BaseExperimentConfig)
+
 
 def run_exp(build_trainer: Callable[[TCfg], Any], cfg_cls: type[TCfg]) -> Callable[[Path], None]:
     def inner(config_path: Path) -> None:

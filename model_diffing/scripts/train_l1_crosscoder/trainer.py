@@ -11,7 +11,6 @@ from model_diffing.utils import (
     calculate_reconstruction_loss,
     get_explained_var_dict,
     l0_norm,
-    multi_reduce,
     sparsity_loss_l1_of_norms,
 )
 
@@ -76,7 +75,7 @@ class L1CrosscoderTrainer(BaseModelLayerTrainer[L1TrainConfig, ReLUActivation]):
             self.wandb_run.log(log_dict, step=self.step)
 
     def _l1_coef_scheduler(self) -> float:
-        if self.step < self.cfg.l1_coef_n_steps:
-            return self.cfg.l1_coef_max * self.step / self.cfg.l1_coef_n_steps
+        if self.step < self.cfg.lambda_s_n_steps:
+            return self.cfg.lambda_s_max * self.step / self.cfg.lambda_s_n_steps
         else:
-            return self.cfg.l1_coef_max
+            return self.cfg.lambda_s_max
