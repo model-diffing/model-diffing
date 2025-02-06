@@ -14,8 +14,11 @@ data:
     layer_indices_to_harvest: [8]
     harvesting_batch_size: 32
   activations_shuffle_buffer_size: 16_384
+  token_window_size: 2
 crosscoder:
   hidden_dim: 6144
+  jumprelu:
+    backprop_through_jumprelu_input: true
 train:
   batch_size: 32
   optimizer:
@@ -25,12 +28,8 @@ train:
   num_steps: 30_000
   save_every_n_steps: 500
   log_every_n_steps: 50
-
   c: 4.0
   final_lambda_s: 2.0
-  lambda_p: 0.000003 # 3e-6
-  jumprelu:
-    backprop_through_jumprelu_input: true
-
+  lambda_p: 0.000003
 experiment_name: test
-wandb: True
+wandb: true

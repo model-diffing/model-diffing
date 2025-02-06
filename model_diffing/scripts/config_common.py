@@ -1,4 +1,5 @@
 from datetime import datetime
+from operator import xor
 from typing import Any
 
 from model_diffing.utils import BaseModel
@@ -47,17 +48,9 @@ class BaseTrainConfig(BaseModel):
 
     def model_post_init(self, __context: Any) -> None:
         super().model_post_init(__context)
-        if not (
-            (
-                self.epochs is not None  #
-                and self.num_steps_per_epoch is not None
-                and self.num_steps is None
-            )
-            or (
-                self.epochs is None  #
-                and self.num_steps_per_epoch is None
-                and self.num_steps is not None
-            )
+        if not xor(
+            (self.epochs is None and self.num_steps_per_epoch is None),
+            (self.num_steps is None),
         ):
             raise ValueError("must provide either only epochs and num_steps_per_epoch or only num_steps")
 
