@@ -4,8 +4,6 @@ from pathlib import Path
 
 import torch
 import wandb
-import yaml
-from einops import rearrange
 from wandb.sdk.wandb_run import Run
 
 from model_diffing.analysis.visualization import create_visualizations
@@ -13,13 +11,18 @@ from model_diffing.dataloader.activations import BaseActivationsDataloader
 from model_diffing.log import logger
 from model_diffing.models.crosscoder import AcausalCrosscoder
 from model_diffing.scripts.config_common import BaseTrainConfig
-from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer, estimate_norm_scaling_factor_ML
-from model_diffing.utils import CONFIG_FILE_NAME, MODEL_FILE_NAME, save_model_and_config
+from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer
+from model_diffing.utils import CONFIG_FILE_NAME, MODEL_FILE_NAME, SaveableModule, save_model_and_config
 
 
+<<<<<<< HEAD:model_diffing/scripts/trainer.py
 
 class BaseTrainer[TConfig: BaseTrainConfig]:
     step: int
+=======
+class BaseTrainer[TConfig: BaseTrainConfig, TAct: SaveableModule]:
+    tep: int
+>>>>>>> model-diffing/main:model_diffing/scripts/base_trainer.py
     epoch: int
     unique_tokens_trained: int
 
@@ -33,7 +36,7 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
         self,
         cfg: TConfig,
         activations_dataloader: BaseActivationsDataloader,
-        crosscoder: AcausalCrosscoder,
+        crosscoder: AcausalCrosscoder[TAct],
         wandb_run: Run | None,
         device: torch.device,
         layers_to_harvest: list[int],
@@ -47,6 +50,11 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
 
         self.num_steps_per_epoch = validate_num_steps_per_epoch(
             cfg.epochs, cfg.num_steps_per_epoch, cfg.num_steps, activations_dataloader
+        )
+
+        self.total_steps = self.num_steps_per_epoch * (cfg.epochs or 1)
+        logger.info(
+            f"Total steps: {self.total_steps} (num_steps_per_epoch: {self.num_steps_per_epoch}, epochs: {cfg.epochs})"
         )
 
         self.lr_scheduler = build_lr_scheduler(cfg.optimizer, self.num_steps_per_epoch)
@@ -69,18 +77,6 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
         self.unique_tokens_trained = 0
 
     def train(self):
-        logger.info("Estimating norm scaling factors (model, layer)")
-
-        norm_scaling_factors_ML = estimate_norm_scaling_factor_ML(
-            self.activations_dataloader.get_shuffled_activations_iterator_BMLD(),
-            self.device,
-            self.cfg.n_batches_for_norm_estimate,
-        )
-
-        norm_scaling_factors_ML1 = rearrange(norm_scaling_factors_ML, "m l -> m l 1")
-
-        logger.info(f"Norm scaling factors (model, layer): {norm_scaling_factors_ML}")
-
         if self.wandb_run:
             self.wandb_run.save(
                 f"{self.wandb_checkpoint_dir}/*",
@@ -96,7 +92,6 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
 
             for example_BMLD in epoch_dataloader:
                 batch_BMLD = example_BMLD.to(self.device)
-                batch_BMLD = batch_BMLD * norm_scaling_factors_ML1
 
                 log_dict = {
                     **self._train_step(batch_BMLD),
@@ -116,29 +111,32 @@ class BaseTrainer[TConfig: BaseTrainConfig]:
                         visualizations = create_visualizations(
                             self.crosscoder.W_dec_HMLD.detach().cpu(), self.layers_to_harvest
                         )
-                        self.wandb_run.log(
-                            {f"visualizations/{k}": wandb.Plotly(v) for k, v in visualizations.items()},
-                            step=self.step,
-                        )
+                        if visualizations is not None:
+                            self.wandb_run.log(
+                                {f"visualizations/{k}": wandb.Plotly(v) for k, v in visualizations.items()},
+                                step=self.step,
+                            )
 
-                    if (
-                        self.cfg.upload_checkpoint_to_wandb_every_n_steps is not None
-                        and self.step % self.cfg.upload_checkpoint_to_wandb_every_n_steps == 0
-                    ):
-                        with self.crosscoder.temporary_fold(norm_scaling_factors_ML):
-                            cfg_dict = self.crosscoder.dump_cfg()
-                            state_dict = self.crosscoder.state_dict()
+                    # if (
+                    #     self.cfg.upload_checkpoint_to_wandb_every_n_steps is not None
+                    #     and self.step % self.cfg.upload_checkpoint_to_wandb_every_n_steps == 0
+                    # ):
+                    #     with self.crosscoder.temporarily_fold_activation_scaling(norm_scaling_factors_ML):
+                    #         cfg_dict = self.crosscoder.dump_cfg()
+                    #         state_dict = self.crosscoder.state_dict()
 
-                            cfg_path = self.wandb_checkpoint_dir / CONFIG_FILE_NAME
-                            model_path = self.wandb_checkpoint_dir / MODEL_FILE_NAME
+                    #         cfg_path = self.wandb_checkpoint_dir / CONFIG_FILE_NAME
+                    #         model_path = self.wandb_checkpoint_dir / MODEL_FILE_NAME
 
-                            with open(cfg_path, "w") as f:
-                                yaml.dump(cfg_dict, f)
+                    #         with open(cfg_path, "w") as f:
+                    #             yaml.dump(cfg_dict, f)
 
-                            torch.save(state_dict, model_path)
+                    #         torch.save(state_dict, model_path)
 
                 if self.cfg.save_every_n_steps is not None and self.step % self.cfg.save_every_n_steps == 0:
-                    with self.crosscoder.temporary_fold(norm_scaling_factors_ML):
+                    with self.crosscoder.temporarily_fold_activation_scaling(
+                        self.activations_dataloader.get_norm_scaling_factors_ML()
+                    ):
                         save_model_and_config(
                             config=self.cfg,
                             save_dir=self.local_save_dir,

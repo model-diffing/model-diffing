@@ -118,7 +118,7 @@ def l2_norm(
     return torch.norm(input, p=2, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
 
 
-def weighted_l1_sparsity_loss(
+def _weighted_l1_sparsity_loss(
     W_dec_HMLD: torch.Tensor,
     hidden_BH: torch.Tensor,
     layer_reduction: Reduction,  # type: ignore
@@ -144,13 +144,13 @@ def weighted_l1_sparsity_loss(
 
 
 sparsity_loss_l2_of_norms = partial(
-    weighted_l1_sparsity_loss,
+    _weighted_l1_sparsity_loss,
     layer_reduction=l2_norm,
     model_reduction=l2_norm,
 )
 
 sparsity_loss_l1_of_norms = partial(
-    weighted_l1_sparsity_loss,
+    _weighted_l1_sparsity_loss,
     layer_reduction=l1_norm,
     model_reduction=l1_norm,
 )
@@ -221,3 +221,13 @@ def get_explained_var_dict(explained_variance_ML: torch.Tensor, layers_to_harves
     }
 
     return explained_variances_dict
+
+
+def get_decoder_norms_H(W_dec_HMLD: torch.Tensor) -> torch.Tensor:
+    W_dec_l2_norms_HML = reduce(W_dec_HMLD, "hidden model layer dim -> hidden model layer", l2_norm)
+    norms_H = reduce(W_dec_l2_norms_HML, "hidden model layer -> hidden", torch.sum)
+    return norms_H
+
+
+def size_GB(tensor: torch.Tensor) -> float:
+    return tensor.numel() * tensor.element_size() / (1024**3)
