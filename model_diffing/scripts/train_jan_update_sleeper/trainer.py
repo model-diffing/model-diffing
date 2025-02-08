@@ -7,15 +7,16 @@ import torch
 from torch.nn.utils import clip_grad_norm_
 from typing import Any
 from wandb.sdk.wandb_run import Run
-from model_diffing.models.crosscoder import TopkActivation
 from model_diffing.log import logger
-from model_diffing.models.crosscoder import AcausalCrosscoder
+from model_diffing.models.crosscoder import AcausalCrosscoder, JumpReLUActivation
 from model_diffing.scripts.base_trainer import validate_num_steps_per_epoch
-from model_diffing.scripts.train_topk_sleeper.config import TrainConfig
+from model_diffing.scripts.train_jan_update_sleeper.config import JanUpdateTrainConfig
 from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer
 from model_diffing.utils import (
     calculate_explained_variance_ML,
     calculate_reconstruction_loss,
+    get_decoder_norms_H,
+    l0_norm,
 )
 from model_diffing.dataloader.activations import BaseActivationsDataloader
 from torch import nn
@@ -36,14 +37,14 @@ def save_model(save_dir: Path, model: nn.Module, epoch: int) -> None:
     logger.info("Saved model to %s", model_file)
 
 
-class TopKTrainer:
+class JanUpdateCrosscoderTrainer:
     def __init__(
         self,
-        cfg: TrainConfig,
+        cfg: JanUpdateTrainConfig,
         cfg_raw: str,
         activations_dataloader: BaseActivationsDataloader,
         activations_validation_dataloader: BaseActivationsDataloader,
-        crosscoder: AcausalCrosscoder[TopkActivation],
+        crosscoder: AcausalCrosscoder[JumpReLUActivation],
         wandb_run: Run | None,
         device: torch.device,
         layers_to_harvest: list[int],
@@ -60,8 +61,9 @@ class TopKTrainer:
         self.num_steps_per_epoch = validate_num_steps_per_epoch(
             cfg.epochs, None, None, activations_dataloader
         )
+        self.total_steps = self.num_steps_per_epoch * (cfg.epochs or 1)
 
-        self.lr_scheduler = build_lr_scheduler(cfg.optimizer, self.num_steps_per_epoch*self.epochs)
+        self.lr_scheduler = build_lr_scheduler(cfg.optimizer, self.total_steps)
 
         self.activations_dataloader = activations_dataloader
         self.activations_validation_dataloader = activations_validation_dataloader
@@ -171,27 +173,41 @@ class TopKTrainer:
             self.epoch += 1
 
 
-    def _get_loss(self, batch_BMLD: torch.Tensor) -> tuple[torch.Tensor, np.ndarray[Any, np.dtype[np.float64]]]:
+    def _get_loss(self, batch_BMLD: torch.Tensor
+                  ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
+                             np.ndarray[Any, np.dtype[np.float64]]]:
         train_res = self.crosscoder.forward_train(batch_BMLD)
 
         reconstruction_loss = calculate_reconstruction_loss(batch_BMLD, train_res.reconstructed_acts_BMLD)
+        decoder_norms_H = get_decoder_norms_H(self.crosscoder.W_dec_HMLD)
+        tanh_sparsity_loss = self._tanh_sparsity_loss(train_res.hidden_BH, decoder_norms_H)
+        pre_act_loss = self._pre_act_loss(train_res.hidden_BH, decoder_norms_H)
+        loss = reconstruction_loss + tanh_sparsity_loss + pre_act_loss
+        mean_l0 = l0_norm(train_res.hidden_BH, dim=-1).mean()
 
-        with torch.no_grad():
-            explained_variance_ML = calculate_explained_variance_ML(batch_BMLD, train_res.reconstructed_acts_BMLD)
+        
+        explained_variance_ML = calculate_explained_variance_ML(batch_BMLD, train_res.reconstructed_acts_BMLD)
 
-        return reconstruction_loss, explained_variance_ML.cpu().numpy()
+        return (loss, reconstruction_loss, mean_l0, tanh_sparsity_loss, pre_act_loss,
+                explained_variance_ML.cpu().detach().numpy())
 
     def _train_step(self, batch_BMLD: torch.Tensor) -> dict[str, float]:
         self.optimizer.zero_grad()
 
-        reconstruction_loss, explained_variance_ML = self._get_loss(batch_BMLD)
-        reconstruction_loss.backward()
+        (loss, reconstruction_loss, mean_l0, tanh_sparsity_loss, pre_act_loss,
+                explained_variance_ML) = self._get_loss(batch_BMLD)
+        loss.backward()
         clip_grad_norm_(self.crosscoder.parameters(), 1.0)
         self.optimizer.step()
         self.optimizer.param_groups[0]["lr"] = self.lr_scheduler(self.step)
-
+        
         log_dict = {
             "train/reconstruction_loss": reconstruction_loss.item(),
+            "train/mean_l0": mean_l0.item(),    
+            "train/mean_l0_pct": mean_l0.item() / self.crosscoder.hidden_dim,
+            "train/reconstruction_loss": reconstruction_loss.item(),
+            "train/tanh_sparsity_loss": tanh_sparsity_loss.item(),
+            "train/pre_act_loss": pre_act_loss.item(),
             "train/mean_explained_variance": explained_variance_ML.mean(),
             "train/lr": self.optimizer.param_groups[0]["lr"],
         }
@@ -200,9 +216,30 @@ class TopKTrainer:
     
     def _test_step(self, batch_BMLD: torch.Tensor) -> dict[str, float]:
         with torch.no_grad():
-            reconstruction_loss, explained_variance_ML = self._get_loss(batch_BMLD)
+            (loss, reconstruction_loss, mean_l0, tanh_sparsity_loss, pre_act_loss,
+                explained_variance_ML) = self._get_loss(batch_BMLD)
 
         return {
             "test/reconstruction_loss": reconstruction_loss.item(),
+            "test/mean_l0": mean_l0.item(),
+            "test/mean_l0_pct": mean_l0.item() / self.crosscoder.hidden_dim,
+            "test/reconstruction_loss": reconstruction_loss.item(),
+            "test/tanh_sparsity_loss": tanh_sparsity_loss.item(),
+            "test/pre_act_loss": pre_act_loss.item(),
             "test/mean_explained_variance": explained_variance_ML.mean(),
+
         }
+    
+    def _lambda_s_scheduler(self) -> float:
+        """linear ramp from 0 to lambda_s over the course of training"""
+        return (self.step / self.total_steps) * self.cfg.lambda_s
+
+    def _tanh_sparsity_loss(self, hidden_BH: torch.Tensor, decoder_norms_H: torch.Tensor) -> torch.Tensor:
+        lambda_s = self._lambda_s_scheduler()
+        inner_BH = torch.tanh(self.cfg.c * hidden_BH * decoder_norms_H)
+        return lambda_s * inner_BH.sum(-1).mean()
+
+    def _pre_act_loss(self, hidden_BH: torch.Tensor, decoder_norms_H: torch.Tensor) -> torch.Tensor:
+        t_H = self.crosscoder.hidden_activation.log_threshold_H
+        x_BH = torch.relu(t_H.exp() - hidden_BH) * decoder_norms_H
+        return self.cfg.lambda_p * x_BH.sum(-1).mean()

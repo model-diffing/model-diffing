@@ -132,7 +132,10 @@ class JumpReLU(t.autograd.Function):
         threshold_X = log_threshold_X.exp()
         ctx.save_for_backward(input_BX, threshold_X, t.tensor(bandwidth))
         ctx.backprop_through_input = backprop_through_input
-        return input_BX > threshold_X * input_BX
+        #! Changed
+        mask = input_BX > threshold_X * input_BX
+        return mask * input_BX
+        #return input_BX > threshold_X * input_BX
 
     @staticmethod
     def backward(ctx: Any, grad_output_BX: t.Tensor) -> tuple[t.Tensor | None, t.Tensor, None]:  # type: ignore

@@ -4,7 +4,7 @@ import fire  # type: ignore
 import yaml  # type: ignore
 import torch
 
-from model_diffing.dataloader.data import build_dataloader, dataset_total_sequences
+from model_diffing.dataloader.data import build_dataloader
 from model_diffing.log import logger
 from model_diffing.models.crosscoder import build_topk_crosscoder
 from model_diffing.scripts.llms import build_llm_lora
@@ -45,8 +45,8 @@ def build_trainer(cfg: TopKExperimentConfig, config_raw: str) -> TopKTrainer:
         crosscoder.folded_scaling_factors_ML = unit_scaling_factors_ML
         crosscoder.load_state_dict(state_dict)
         norm_scaling_factors_ML = crosscoder.unfold_activation_scaling_from_weights_()
-    else:
-        norm_scaling_factors_ML = None
+        dataloader.norm_scaling_factors_ML = norm_scaling_factors_ML
+    
 
     wandb_run = build_wandb_run(cfg) if cfg.wandb else None
 
@@ -60,7 +60,6 @@ def build_trainer(cfg: TopKExperimentConfig, config_raw: str) -> TopKTrainer:
         device=device,
         layers_to_harvest=cfg.data.activations_harvester.layer_indices_to_harvest,
         experiment_name=cfg.experiment_name,
-        norm_scaling_factors_ML=norm_scaling_factors_ML,
     )
 
 

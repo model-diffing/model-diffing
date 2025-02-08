@@ -18,25 +18,11 @@ from model_diffing.scripts.llms import build_llms
 from transformer_lens import HookedTransformer
 
 
-
-def dataset_total_sequences(cfg: DataConfig, llms: list[HookedTransformer], cache_dir: str) -> tuple[int, int]:
-    tokenizer = llms[0].tokenizer
-    if not isinstance(tokenizer, PreTrainedTokenizerBase):
-        raise ValueError("Tokenizer is not a PreTrainedTokenizerBase")
-    token_sequence_iterator_S = _build_tokens_sequence_iterator(
-        cfg=cfg.sequence_iterator,
-        cache_dir=cache_dir,
-        tokenizer=tokenizer,
-    ).get_sequence_iterator()
-    sequence_length = len(next(token_sequence_iterator_S))
-    return 1+sum(1 for s in token_sequence_iterator_S), sequence_length
-
-
 def build_dataloader(
     cfg: DataConfig,
     cache_dir: str,
     device: torch.device,
-) -> BaseActivationsDataloader:
+) -> ScaledActivationsDataloader:
     llms = build_llms(
         cfg.activations_harvester.llms,
         cache_dir,

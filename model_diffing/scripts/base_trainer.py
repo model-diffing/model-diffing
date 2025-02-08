@@ -15,14 +15,8 @@ from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer
 from model_diffing.utils import CONFIG_FILE_NAME, MODEL_FILE_NAME, SaveableModule, save_model_and_config
 
 
-<<<<<<< HEAD:model_diffing/scripts/trainer.py
-
-class BaseTrainer[TConfig: BaseTrainConfig]:
-    step: int
-=======
 class BaseTrainer[TConfig: BaseTrainConfig, TAct: SaveableModule]:
-    tep: int
->>>>>>> model-diffing/main:model_diffing/scripts/base_trainer.py
+    step: int
     epoch: int
     unique_tokens_trained: int
 
@@ -30,7 +24,7 @@ class BaseTrainer[TConfig: BaseTrainConfig, TAct: SaveableModule]:
     # If training without epochs (epochs=1), we need to provide num_steps
     # However, if training with epochs, we don't need to limit the number of steps per epoch,
     # just loop through the dataloader
-    # epochs_steps: tuple[Literal[1], int] | tuple[int, None]
+    # epochs_steps: tu ple[Literal[1], int] | tuple[int, None]
 
     def __init__(
         self,
@@ -92,7 +86,6 @@ class BaseTrainer[TConfig: BaseTrainConfig, TAct: SaveableModule]:
 
             for example_BMLD in epoch_dataloader:
                 batch_BMLD = example_BMLD.to(self.device)
-
                 log_dict = {
                     **self._train_step(batch_BMLD),
                     "train/step": self.step,
