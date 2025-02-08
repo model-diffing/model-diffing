@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
+from functools import cached_property
 from typing import Any, cast
 
 import torch
-from datasets import load_dataset  # type: ignore
+from datasets import Dataset, DatasetDict, IterableDataset, IterableDatasetDict, load_dataset  # type: ignore
 from transformers import PreTrainedTokenizerBase  # type: ignore
 
 from model_diffing.data.shuffle import batch_shuffle_tensor_iterator_BX
@@ -25,37 +26,57 @@ THE_PILE_UNCOPYRIGHTED_HF_DATASET = "monology/pile-uncopyrighted"
 class HuggingfaceTextDatasetTokenSequenceLoader(TokenSequenceLoader):
     def __init__(
         self,
-        hf_dataset_name: str,
+        hf_dataset: DatasetDict | Dataset | IterableDatasetDict | IterableDataset,
         tokenizer: PreTrainedTokenizerBase,
         sequence_length: int,
         shuffle_buffer_size: int,
         batch_size: int,
         cache_dir: str | None = None,
     ):
-        self.hf_dataset_name = hf_dataset_name
+        self._hf_dataset = hf_dataset
         self._cache_dir = cache_dir
         self._tokenizer = tokenizer
         self._sequence_length = sequence_length
         self._shuffle_buffer_size = shuffle_buffer_size
         self._batch_size = batch_size
 
-        self._iterator = self._get_sequences_batch_iterator()
-
     def _get_sequence_iterator(self) -> Iterator[torch.Tensor]:
-        text_dataset = load_dataset(self.hf_dataset_name, streaming=True, cache_dir=self._cache_dir, split="train")
+        example_S = torch.empty(self._sequence_length, dtype=torch.long)
+        example_pointer = 0
 
-        for example in text_dataset:
-            example = cast(dict[str, Any], example)
-            tokeniser_result = self._tokenizer(example["text"])
-            seq_tokens_S = torch.tensor(tokeniser_result["input_ids"])
-            assert len(seq_tokens_S.shape) == 1, f"seq_tokens_S.shape should be 1D but was {seq_tokens_S.shape}"
-            num_full_sequences = len(seq_tokens_S) // self._sequence_length
-            if num_full_sequences == 0:
-                continue
+        for example in self._hf_dataset:
+            tokens = cast(
+                torch.Tensor,
+                self._tokenizer(
+                    cast(dict[str, Any], example)["text"],
+                    return_tensors="pt",
+                )["input_ids"],
+            )
+            assert len(tokens.shape) == 2, f"tokens.shape should be 2D but was {tokens.shape}"
+            assert tokens.shape[0] == 1, f"tokens.shape should have a batch dimension of 1 but was {tokens.shape}"
 
-            for i in range(0, num_full_sequences * self._sequence_length, self._sequence_length):
-                yield seq_tokens_S[i : i + self._sequence_length]
+            seq_tokens_S = tokens.squeeze(0)
+            seq_pointer = 0
 
+            while seq_pointer < seq_tokens_S.shape[0]:
+                tokens_left_to_fill_example = example_S.shape[0] - example_pointer
+                tokens_left_in_seq = seq_tokens_S.shape[0] - seq_pointer
+
+                tokens_to_copy = min(tokens_left_to_fill_example, tokens_left_in_seq)
+
+                example_S[example_pointer : example_pointer + tokens_to_copy] = (  #
+                    seq_tokens_S[seq_pointer : seq_pointer + tokens_to_copy]
+                )
+
+                # this is always valid because of the `min` above
+                example_pointer += tokens_to_copy
+                seq_pointer += tokens_to_copy
+
+                if example_pointer == self._sequence_length:
+                    example_pointer = 0
+                    yield example_S
+
+    @cached_property
     def _get_sequences_batch_iterator(self) -> Iterator[torch.Tensor]:
         # we shuffle this iterator (only between, not within, sequences) so that we don't have to worry
         # about long documents introducing high feature correlations
@@ -64,11 +85,11 @@ class HuggingfaceTextDatasetTokenSequenceLoader(TokenSequenceLoader):
             tensor_iterator_X=self._get_sequence_iterator(),
             shuffle_buffer_size=self._shuffle_buffer_size,
             yield_batch_size=self._batch_size,
-            name=f"{self.hf_dataset_name} sequences",
+            name="token sequence loader",
         )
 
     def get_sequences_batch_iterator(self) -> Iterator[torch.Tensor]:
-        return self._iterator
+        return self._get_sequences_batch_iterator
 
     def num_batches(self) -> int | None:
         # This kind of can't easily be computed, because it's a function of sequence length and each example's length
@@ -137,11 +158,17 @@ def build_tokens_sequence_loader(
     if cfg.classname == "HuggingfaceTextDatasetTokenSequenceLoader":
         if cfg.kwargs is None:
             raise ValueError("kwargs must be provided")
+        text_dataset = load_dataset(
+            path=cfg.kwargs["hf_dataset_name"],
+            streaming=True,
+            cache_dir=cache_dir,
+            split="train",
+        )
         return HuggingfaceTextDatasetTokenSequenceLoader(
             cache_dir=cache_dir,
             tokenizer=tokenizer,
             batch_size=batch_size,
-            hf_dataset_name=cfg.kwargs["hf_dataset_name"],
+            hf_dataset=text_dataset,
             sequence_length=cfg.kwargs["sequence_length"],
             shuffle_buffer_size=cfg.kwargs["shuffle_buffer_size"],
         )
@@ -159,20 +186,3 @@ def build_tokens_sequence_loader(
         )
 
     raise ValueError(f"Unknown tokens sequence iterator config name: {cfg}")
-
-
-# if __name__ == "__main__":
-#     from itertools import islice
-
-#     from transformers import AutoTokenizer
-
-#     token_loader = HuggingfaceTextDatasetTokenSequenceLoader(
-#         hf_dataset_name=THE_PILE_UNCOPYRIGHTED_HF_DATASET,
-#         tokenizer=AutoTokenizer.from_pretrained("EleutherAI/pythia-160m"),
-#         cache_dir=".cache",
-#         batch_size=16,
-#         sequence_length=1024,
-#         shuffle_buffer_size=2**14,  # 16k
-#     )
-#     for tokens in islice(token_loader.get_sequences_batch_iterator(), 10):
-#         print(tokens.shape)
