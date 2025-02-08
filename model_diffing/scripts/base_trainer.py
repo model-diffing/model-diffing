@@ -7,6 +7,7 @@ from typing import Any, Generic, TypeVar
 
 import torch
 import yaml  # type: ignore
+from tqdm import tqdm  # type: ignore
 from wandb.sdk.wandb_run import Run
 
 from model_diffing.data.model_layer_dataloader import BaseModelLayerActivationsDataloader
@@ -21,12 +22,13 @@ def save_config(config: BaseTrainConfig, save_dir: Path) -> None:
     save_dir.mkdir(parents=True, exist_ok=True)
     with open(save_dir / "config.yaml", "w") as f:
         yaml.dump(config, f)
-    logger.info("Saved config to %s", save_dir / "config.yaml")
+    logger.info(f"Saved config to {save_dir / 'config.yaml'}")
 
 
 def save_model(model: SaveableModule, save_dir: Path, epoch: int, step: int) -> None:
     save_dir.mkdir(parents=True, exist_ok=True)
     model.save(save_dir / f"epoch_{epoch}_step_{step}")
+    logger.info(f"Saved model to {save_dir / f'epoch_{epoch}_step_{step}'}")
 
 
 # using python3.11 generics because it's better supported by GPU providers
@@ -81,11 +83,13 @@ class BaseModelLayerTrainer(Generic[TConfig, TAct]):
 
     def train(self) -> None:
         save_config(self.cfg, self.save_dir)
-        for _ in range(self.cfg.epochs or 1):
+        # for _ in range(self.cfg.epochs or 1):
+        epoch_iter = tqdm(range(self.cfg.epochs), desc="Epochs") if self.cfg.epochs is not None else range(1)
+        for _ in epoch_iter:
             epoch_dataloader_BMLD = self.activations_dataloader.get_shuffled_activations_iterator_BMLD()
             epoch_dataloader_BMLD = islice(epoch_dataloader_BMLD, self.num_steps_per_epoch)
 
-            for batch_BMLD in epoch_dataloader_BMLD:
+            for batch_BMLD in tqdm(epoch_dataloader_BMLD, desc="Train Steps"):
                 batch_BMLD = batch_BMLD.to(self.device)
 
                 self._train_step(batch_BMLD)
@@ -96,7 +100,7 @@ class BaseModelLayerTrainer(Generic[TConfig, TAct]):
                     with self.crosscoder.temporarily_fold_activation_scaling(
                         self.activations_dataloader.get_norm_scaling_factors_ML()
                     ):
-                        save_model(self.crosscoder, self.save_dir, self.epoch, self.step)
+                        save_model(self.crosscoder, self.save_dir / f"step{self.step}", self.epoch, self.step)
 
                 if self.epoch == 0:
                     self.unique_tokens_trained += batch_BMLD.shape[0]

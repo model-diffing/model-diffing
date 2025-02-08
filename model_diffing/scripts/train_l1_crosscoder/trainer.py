@@ -1,3 +1,5 @@
+from typing import Any
+
 import torch
 from torch.nn.utils import clip_grad_norm_
 
@@ -23,8 +25,11 @@ class L1CrosscoderTrainer(BaseModelLayerTrainer[L1TrainConfig, ReLUActivation]):
 
         # losses
         reconstruction_loss = calculate_reconstruction_loss(batch_BMLD, train_res.reconstructed_acts_BXD)
+
+        W_H1MLD = self.crosscoder.W_dec_HXD[:, None]
+
         sparsity_loss = sparsity_loss_l1_of_norms(
-            W_dec_HTMLD=self.crosscoder.W_dec_HXD[:, None],
+            W_dec_HTMLD=W_H1MLD,
             hidden_BH=train_res.hidden_BH,
         )
         l1_coef = self._l1_coef_scheduler()
@@ -50,7 +55,7 @@ class L1CrosscoderTrainer(BaseModelLayerTrainer[L1TrainConfig, ReLUActivation]):
                 ("layer", self.layers_to_harvest),
             )
 
-            log_dict = {
+            log_dict: dict[str, Any] = {
                 "train/l1_coef": l1_coef,
                 "train/mean_l0": mean_l0,
                 "train/mean_l0_pct": mean_l0 / self.crosscoder.hidden_dim,

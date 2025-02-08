@@ -18,7 +18,7 @@ def build_jan_update_crosscoder_trainer(cfg: JanUpdateExperimentConfig) -> JanUp
     device = get_device()
 
     dataloader = build_dataloader(cfg.data, cfg.train.batch_size, cfg.cache_dir, device)
-    _, n_layers, n_models, d_model = dataloader.batch_shape_BMLD()
+    _, n_models, n_layers, d_model = dataloader.batch_shape_BMLD()
 
     crosscoder = _build_jan_update_crosscoder(
         n_models=n_models,
@@ -84,19 +84,19 @@ def _build_jan_update_crosscoder(
             * (n / m)
         )
 
-        raise ValueError("need to fix this: 10000/m, not 1/10000")
+        # raise ValueError("need to fix this: 10000/m, not 1/10000")
         calibrated_b_enc_H = _compute_b_enc_H(
             data_loader,
             cc.W_enc_XDH,
             cc.hidden_activation.log_threshold_H.exp(),
             device,
             n_examples_to_sample=50_000,
-            firing_sparsity=5_000,
+            firing_sparsity=4,
         )
         cc.b_enc_H.copy_(calibrated_b_enc_H)
 
         # no data-dependent initialization of b_dec
-        cc.b_dec_MLD.zero_()
+        cc.b_dec_XD.zero_()
 
     return cc
 

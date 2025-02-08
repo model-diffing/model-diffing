@@ -42,12 +42,12 @@ class FakeActivationsDataloader(BaseModelLayerActivationsDataloader):
             yield torch.randint(
                 0,
                 100,
-                (self._batch_size, self._n_layers, self._n_models, self._d_model),
+                (self._batch_size, self._n_models, self._n_layers, self._d_model),
                 dtype=torch.float32,
             )
 
     def batch_shape_BMLD(self) -> tuple[int, int, int, int]:
-        return (self._batch_size, self._n_layers, self._n_models, self._d_model)
+        return (self._batch_size, self._n_models, self._n_layers, self._d_model)
 
     def num_batches(self) -> int | None:
         return self._num_batches
