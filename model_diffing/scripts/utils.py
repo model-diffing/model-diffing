@@ -36,8 +36,14 @@ def estimate_norm_scaling_factor_ML(
     device: torch.device,
     n_batches_for_norm_estimate: int,
 ) -> torch.Tensor:
+    '''
+    Estimate the norm scaling factor for each model and layer.
+    '''
+    # dimension of each activation vector (d_model)
     d_model = next(dataloader_BMLD).shape[-1]
+    # calculates the average L2 norm of activations for each model and layer
     mean_norms_ML = _estimate_mean_norms_ML(dataloader_BMLD, device, n_batches_for_norm_estimate)
+    # scaling factors = sqrt(d_model) / mean_norms
     scaling_factors_ML = torch.sqrt(torch.tensor(d_model)) / mean_norms_ML
     return scaling_factors_ML
 
@@ -49,6 +55,9 @@ def _estimate_mean_norms_ML(
     device: torch.device,
     n_batches_for_norm_estimate: int,
 ) -> torch.Tensor:
+    '''
+    Estimate the mean L2 norm of activations for each model and layer.
+    '''
     norm_samples = []
 
     for batch_BMLD in tqdm(
