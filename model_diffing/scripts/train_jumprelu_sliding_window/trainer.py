@@ -6,13 +6,14 @@ from typing import Any
 import torch as t
 import torch.nn as nn
 from torch.nn.utils import clip_grad_norm_
+from tqdm import tqdm  # type: ignore
 from wandb.sdk.wandb_run import Run
 
 from model_diffing.data.token_layer_dataloader import BaseTokenLayerActivationsDataloader
 from model_diffing.log import logger
 from model_diffing.models.activations.jumprelu import JumpReLUActivation
 from model_diffing.models.crosscoder import AcausalCrosscoder
-from model_diffing.scripts.base_trainer import save_config, validate_num_steps_per_epoch
+from model_diffing.scripts.base_trainer import save_config, save_model, validate_num_steps_per_epoch
 from model_diffing.scripts.train_jan_update_crosscoder.config import JanUpdateTrainConfig
 from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer, wandb_histogram
 from model_diffing.utils import (
@@ -111,23 +112,25 @@ class JumpreluSlidingWindowCrosscoderTrainer:
     def train(self):
         save_config(self.cfg, self.save_dir)
 
-        for _ in range(self.cfg.epochs or 1):
+        epoch_iter = tqdm(range(self.cfg.epochs), desc="Epochs") if self.cfg.epochs is not None else range(1)
+        for _ in epoch_iter:
             epoch_dataloader_BTLD = self.activations_dataloader.get_shuffled_activations_iterator_BTLD()
             epoch_dataloader_BTLD = islice(epoch_dataloader_BTLD, self.num_steps_per_epoch)
 
-            for batch_BTLD in epoch_dataloader_BTLD:
+            for batch_BTLD in tqdm(epoch_dataloader_BTLD, desc="Train Steps"):
                 batch_BTLD = batch_BTLD.to(self.device)
 
                 self._train_step(batch_BTLD)
 
-                # TODO(oli): get wandb checkpoint saving working
+                if self.cfg.save_every_n_steps is not None and self.step % self.cfg.save_every_n_steps == 0:
+                    scaling_factors_TL = self.activations_dataloader.get_norm_scaling_factors_TL()
+                    with self.crosscoders.single_cc.temporarily_fold_activation_scaling(
+                        scaling_factors_TL.mean(dim=0, keepdim=True)
+                    ):
+                        save_model(self.crosscoders.single_cc, self.save_dir / "single_cc", self.epoch, self.step)
 
-                # if self.cfg.save_every_n_steps is not None and self.step % self.cfg.save_every_n_steps == 0:
-                #     for i, crosscoder in enumerate(self.crosscoders):
-                #         with crosscoder.temporarily_fold_activation_scaling(
-                #             self.activations_dataloader.get_norm_scaling_factors_ML()
-                #         ):
-                #             save_model(crosscoder, self.save_dir / f"crosscoder{i}", self.epoch, self.step)
+                    with self.crosscoders.double_cc.temporarily_fold_activation_scaling(scaling_factors_TL):
+                        save_model(self.crosscoders.double_cc, self.save_dir / "double_cc", self.epoch, self.step)
 
                 if self.epoch == 0:
                     self.unique_tokens_trained += batch_BTLD.shape[0]
