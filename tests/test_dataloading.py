@@ -1,4 +1,4 @@
-from model_diffing.data.model_layer_dataloader import ActivationsHarvester, ScaledModelLayerActivationsDataloader
+from model_diffing.data.model_hookpoint_dataloader import ActivationsHarvester, ScaledModelHookpointActivationsDataloader
 from model_diffing.data.token_loader import ToyOverfittingTokenSequenceLoader
 from model_diffing.scripts.config_common import LLMConfig
 from model_diffing.scripts.llms import build_llms
@@ -26,13 +26,13 @@ def test():
     sample_batch = next(sequence_loader.get_sequences_batch_iterator())
     assert sample_batch.shape == (harvesting_batch_size, sequence_len)
 
-    layer_indices_to_harvest = [6]
+    hookpoints = ["blocks.6.hook_resid_post"]
     activations_harvester = ActivationsHarvester(
         llms=llms,
-        layer_indices_to_harvest=layer_indices_to_harvest,
+        hookpoints=hookpoints,
     )
 
-    dataloader = ScaledModelLayerActivationsDataloader(
+    dataloader = ScaledModelHookpointActivationsDataloader(
         activations_harvester=activations_harvester,
         activations_shuffle_buffer_size=training_batch_size * 4,
         token_sequence_loader=sequence_loader,
@@ -41,6 +41,11 @@ def test():
         n_batches_for_norm_estimate=1,
     )
 
-    sample_activations_batch = next(dataloader.get_shuffled_activations_iterator_BMLD())
-    harvested_activation_expected_shape_MLD = (training_batch_size, len(llms), len(layer_indices_to_harvest), d_model)
-    assert sample_activations_batch.shape == harvested_activation_expected_shape_MLD
+    sample_activations_batch_BMPD = next(dataloader.get_shuffled_activations_iterator_BMPD())
+
+    assert sample_activations_batch_BMPD.shape == (
+        training_batch_size, # B
+        len(llms), # M
+        len(hookpoints), # P
+        d_model, # D
+    )

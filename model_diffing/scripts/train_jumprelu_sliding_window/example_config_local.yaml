@@ -11,7 +11,6 @@ data:
         revision: step142000
       - name: EleutherAI/pythia-160M
         revision: step143000
-    layer_indices_to_harvest: [8]
     harvesting_batch_size: 32
   activations_shuffle_buffer_size: 16_384
   token_window_size: 2
@@ -33,3 +32,4 @@ train:
   lambda_p: 0.000003
 experiment_name: test
 wandb: true
+hookpoints: ["blocks.8.hook_resid_post"]

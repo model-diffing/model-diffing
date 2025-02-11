@@ -24,7 +24,6 @@ class SequenceIteratorConfig(BaseModel):
 
 class ActivationsHarvesterConfig(BaseModel):
     llms: list[LLMConfig]
-    layer_indices_to_harvest: list[int]
     inference_dtype: str = "float32"
     harvesting_batch_size: int
 

@@ -5,8 +5,8 @@ import torch
 from einops import rearrange
 from tqdm import tqdm  # type: ignore
 
-from model_diffing.data.token_layer_dataloader import (
-    BaseTokenLayerActivationsDataloader,
+from model_diffing.data.token_hookpoint_dataloader import (
+    BaseTokenhookpointActivationsDataloader,
     build_sliding_window_dataloader,
 )
 from model_diffing.log import logger
@@ -25,30 +25,30 @@ from model_diffing.utils import SaveableModule, get_device, inspect
 TAct = TypeVar("TAct", bound=SaveableModule)
 
 
-class TokenLayerCrosscoder(AcausalCrosscoder[TAct], Generic[TAct]):
+class TokenhookpointCrosscoder(AcausalCrosscoder[TAct], Generic[TAct]):
     def __init__(
         self,
         token_window_size: int,
-        n_layers: int,
+        n_hookpoints: int,
         d_model: int,
         hidden_dim: int,
         dec_init_norm: float,
         hidden_activation: TAct,
     ):
         super().__init__(
-            crosscoding_dims=(token_window_size, n_layers),
+            crosscoding_dims=(token_window_size, n_hookpoints),
             d_model=d_model,
             hidden_dim=hidden_dim,
             dec_init_norm=dec_init_norm,
             hidden_activation=hidden_activation,
         )
-        self.W_enc_TLDH = self.W_enc_XDH
-        self.W_dec_HTLD = self.W_dec_HXD
-        self.b_dec_TLD = self.b_dec_XD
+        self.W_enc_TPDH = self.W_enc_XDH
+        self.W_dec_HTPD = self.W_dec_HXD
+        self.b_dec_TPD = self.b_dec_XD
 
-        assert self.W_enc_TLDH.shape == (token_window_size, n_layers, d_model, hidden_dim)
-        assert self.W_dec_HTLD.shape == (hidden_dim, token_window_size, n_layers, d_model)
-        assert self.b_dec_TLD.shape == (token_window_size, n_layers, d_model)
+        assert self.W_enc_TPDH.shape == (token_window_size, n_hookpoints, d_model, hidden_dim)
+        assert self.W_dec_HTPD.shape == (hidden_dim, token_window_size, n_hookpoints, d_model)
+        assert self.b_dec_TPD.shape == (token_window_size, n_hookpoints, d_model)
 
 
 def _build_sliding_window_crosscoder_trainer(
@@ -56,8 +56,8 @@ def _build_sliding_window_crosscoder_trainer(
 ) -> JumpreluSlidingWindowCrosscoderTrainer:
     device = get_device()
 
-    dataloader = build_sliding_window_dataloader(cfg.data, cfg.train.batch_size, cfg.cache_dir, device)
-    _, n_tokens, n_layers, d_model = dataloader.batch_shape_BTLD()
+    dataloader = build_sliding_window_dataloader(cfg.data, cfg.hookpoints, cfg.train.batch_size, cfg.cache_dir, device)
+    _, n_tokens, n_hookpoints, d_model = dataloader.batch_shape_BTPD()
     assert n_tokens == 2
 
     if cfg.data.token_window_size != 2:
@@ -66,7 +66,7 @@ def _build_sliding_window_crosscoder_trainer(
     crosscoder1, crosscoder2 = [
         _build_jumprelu_crosscoder(
             n_tokens=window_size,
-            n_layers=n_layers,
+            n_hookpoints=n_hookpoints,
             d_model=d_model,
             cc_hidden_dim=cfg.crosscoder.hidden_dim,
             jumprelu=cfg.crosscoder.jumprelu,
@@ -87,23 +87,23 @@ def _build_sliding_window_crosscoder_trainer(
         crosscoders=crosscoders,
         wandb_run=wandb_run,
         device=device,
-        layers_to_harvest=cfg.data.activations_harvester.layer_indices_to_harvest,
+        hookpoints=cfg.hookpoints,
         experiment_name=cfg.experiment_name,
     )
 
 
 def _build_jumprelu_crosscoder(
     n_tokens: int,
-    n_layers: int,
+    n_hookpoints: int,
     d_model: int,
     cc_hidden_dim: int,
     jumprelu: JumpReLUConfig,
-    dataloader: BaseTokenLayerActivationsDataloader,
+    dataloader: BaseTokenhookpointActivationsDataloader,
     device: torch.device,  # for computing b_enc
-) -> TokenLayerCrosscoder[JumpReLUActivation]:
-    cc = TokenLayerCrosscoder(
+) -> TokenhookpointCrosscoder[JumpReLUActivation]:
+    cc = TokenhookpointCrosscoder(
         token_window_size=n_tokens,
-        n_layers=n_layers,
+        n_hookpoints=n_hookpoints,
         d_model=d_model,
         hidden_dim=cc_hidden_dim,
         dec_init_norm=0,  # dec_init_norm doesn't matter here as we override weights below
@@ -120,19 +120,19 @@ def _build_jumprelu_crosscoder(
     with torch.no_grad():
         # parameters from the jan update doc
 
-        n = float(n_tokens * n_layers * d_model)  # n is the size of the input space
+        n = float(n_tokens * n_hookpoints * d_model)  # n is the size of the input space
         m = float(cc_hidden_dim)  # m is the size of the hidden space
 
         # W_dec ~ U(-1/n, 1/n) (from doc)
-        cc.W_dec_HTLD.uniform_(-1.0 / n, 1.0 / n)
+        cc.W_dec_HTPD.uniform_(-1.0 / n, 1.0 / n)
 
         # For now, assume we're in the X == Y case.
         # Therefore W_enc = (n/m) * W_dec^T
-        cc.W_enc_TLDH.copy_(rearrange(cc.W_dec_HTLD, "h t l d -> t l d h") * (n / m))
+        cc.W_enc_TPDH.copy_(rearrange(cc.W_dec_HTPD, "h t p d -> t p d h") * (n / m))
 
         calibrated_b_enc_H = _compute_b_enc_H(
             dataloader=dataloader,
-            W_enc_TLDH=cc.W_enc_TLDH,
+            W_enc_TPDH=cc.W_enc_TPDH,
             initial_jumprelu_threshold_H=cc.hidden_activation.log_threshold_H.exp(),
             device=device,
             n_examples_to_sample=500,  # this should be enough that the quantile is stable
@@ -141,14 +141,14 @@ def _build_jumprelu_crosscoder(
         cc.b_enc_H.copy_(calibrated_b_enc_H)
 
         # no data-dependent initialization of b_dec
-        cc.b_dec_TLD.zero_()
+        cc.b_dec_TPD.zero_()
 
     return cc
 
 
 def _compute_b_enc_H(
-    dataloader: BaseTokenLayerActivationsDataloader,
-    W_enc_TLDH: torch.Tensor,
+    dataloader: BaseTokenhookpointActivationsDataloader,
+    W_enc_TPDH: torch.Tensor,
     initial_jumprelu_threshold_H: torch.Tensor,
     device: torch.device,
     n_examples_to_sample: int,
@@ -156,7 +156,7 @@ def _compute_b_enc_H(
 ) -> torch.Tensor:
     logger.info(f"Harvesting pre-bias for {n_examples_to_sample} examples")
 
-    pre_bias_NH = _harvest_pre_bias_NH(dataloader, W_enc_TLDH, device, n_examples_to_sample)
+    pre_bias_NH = _harvest_pre_bias_NH(dataloader, W_enc_TPDH, device, n_examples_to_sample)
 
     # find the threshold for each idx H such that "firing_sparsity" of the examples are above the threshold
     quantile_H = torch.quantile(pre_bias_NH, 1 - firing_sparsity, dim=0)
@@ -172,12 +172,12 @@ def _compute_b_enc_H(
 
 
 def _harvest_pre_bias_NH(
-    dataloader: BaseTokenLayerActivationsDataloader,
-    W_enc_TLDH: torch.Tensor,
+    dataloader: BaseTokenhookpointActivationsDataloader,
+    W_enc_TPDH: torch.Tensor,
     device: torch.device,
     n_examples_to_sample: int,
 ) -> torch.Tensor:
-    batch_size = dataloader.batch_shape_BTLD()[0]
+    batch_size = dataloader.batch_shape_BTPD()[0]
 
     remainder = n_examples_to_sample % batch_size
     if remainder != 0:
@@ -192,13 +192,13 @@ def _harvest_pre_bias_NH(
 
     num_batches = n_examples_to_sample // batch_size
 
-    activations_iterator_BTLD = dataloader.get_shuffled_activations_iterator_BTLD()
+    activations_iterator_BTPD = dataloader.get_shuffled_activations_iterator_BTPD()
 
     def get_batch_pre_bias_BH() -> torch.Tensor:
         # this is essentially the first step of the crosscoder forward pass, but not worth
         # creating a new method for it, just (easily) reimplementing it here
-        batch_BTLD = next(activations_iterator_BTLD).to(device)
-        return torch.einsum("b t l d, t l d h -> b h", batch_BTLD, W_enc_TLDH)
+        batch_BTPD = next(activations_iterator_BTPD).to(device)
+        return torch.einsum("b t p d, t p d h -> b h", batch_BTPD, W_enc_TPDH)
 
     first_sample_BH = get_batch_pre_bias_BH()
     hidden_size = first_sample_BH.shape[1]

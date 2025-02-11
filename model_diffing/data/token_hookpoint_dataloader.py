@@ -14,21 +14,21 @@ from model_diffing.scripts.train_jumprelu_sliding_window.config import SlidingWi
 from model_diffing.scripts.utils import estimate_norm_scaling_factor_X
 
 
-class BaseTokenLayerActivationsDataloader(ABC):
+class BaseTokenhookpointActivationsDataloader(ABC):
     @abstractmethod
-    def get_shuffled_activations_iterator_BTLD(self) -> Iterator[torch.Tensor]: ...
+    def get_shuffled_activations_iterator_BTPD(self) -> Iterator[torch.Tensor]: ...
 
     @abstractmethod
-    def batch_shape_BTLD(self) -> tuple[int, int, int, int]: ...
+    def batch_shape_BTPD(self) -> tuple[int, int, int, int]: ...
 
     @abstractmethod
     def num_batches(self) -> int | None: ...
 
     @abstractmethod
-    def get_norm_scaling_factors_TL(self) -> torch.Tensor: ...
+    def get_norm_scaling_factors_TP(self) -> torch.Tensor: ...
 
 
-class SlidingWindowScaledActivationsDataloader(BaseTokenLayerActivationsDataloader):
+class SlidingWindowScaledActivationsDataloader(BaseTokenhookpointActivationsDataloader):
     def __init__(
         self,
         token_sequence_loader: TokenSequenceLoader,
@@ -43,87 +43,88 @@ class SlidingWindowScaledActivationsDataloader(BaseTokenLayerActivationsDataload
         self._activations_harvester = activations_harvester
         self._activations_shuffle_buffer_size = activations_shuffle_buffer_size
         self._yield_batch_size = yield_batch_size
-        self._window_size = window_size
+        self._window_size_tokens = window_size
 
         # important note: using the raw iterator here, not the scaled one.
-        self._norm_scaling_factors_TL = estimate_norm_scaling_factor_X(
-            dataloader_BXD=self._shuffled_raw_activations_iterator_BTLD,
+        self._norm_scaling_factors_TP = estimate_norm_scaling_factor_X(
+            dataloader_BXD=self._shuffled_raw_activations_iterator_BTPD,
             device=device,
             n_batches_for_norm_estimate=n_batches_for_norm_estimate,
         )
 
-        n_models, n_layers, d_model = self._activations_harvester.activation_shape_MLD
+        n_models, n_hookpoints, d_model = self._activations_harvester.activation_shape_MPD
         if n_models != 1:
             raise ValueError(
-                "ActivationHarvester is configured incorrectly. Should only be harvesting for 1 model for sliding window"
+                "ActivationHarvester is configured incorrectPy. Should only be harvesting for 1 model for sliding window"
             )
-        self.activation_shape_LD = n_layers, d_model
+        self.activation_shape_PD = n_hookpoints, d_model
 
-    def get_norm_scaling_factors_TL(self) -> torch.Tensor:
-        return self._norm_scaling_factors_TL
+    def get_norm_scaling_factors_TP(self) -> torch.Tensor:
+        return self._norm_scaling_factors_TP
 
     @torch.no_grad()
-    def _activations_iterator_TLD(self) -> Iterator[torch.Tensor]:
+    def _activations_iterator_TPD(self) -> Iterator[torch.Tensor]:
         for sequences_chunk_BS in self._token_sequence_loader.get_sequences_batch_iterator():
-            activations_BSMLD = self._activations_harvester.get_activations_BSMLD(sequences_chunk_BS)
-            assert activations_BSMLD.shape[2] == 1, "should only be doing 1 model at a time for sliding window"
-            activations_BSLD = activations_BSMLD[:, :, 0]
+            activations_BSMPD = self._activations_harvester.get_activations_BSMPD(sequences_chunk_BS)
+            assert activations_BSMPD.shape[2] == 1, "should only be doing 1 model at a time for sliding window"
+            activations_BSPD = activations_BSMPD[:, :, 0]
 
-            B, S, L, D = activations_BSLD.shape
+            B, S, P, D = activations_BSPD.shape
 
             # sliding window over the sequence dimension, adding a new token dimension
-            activations_BSLDT = activations_BSLD.unfold(
+            activations_BSPDT = activations_BSPD.unfold(
                 dimension=1,
                 size=2,
                 step=1,
             )
-            activations_BsTLD = rearrange(activations_BSLDT, "b s l d t -> (b s) t l d")
-            new_seq_len = S - (self._window_size - 1)
-            assert activations_BsTLD.shape == (B * new_seq_len, self._window_size, L, D)
-            yield from activations_BsTLD
+            activations_BsTPD = rearrange(activations_BSPDT, "b s p d t -> (b s) t p d")
+            new_seq_len = S - (self._window_size_tokens - 1)
+            assert activations_BsTPD.shape == (B * new_seq_len, self._window_size_tokens, P, D)
+            yield from activations_BsTPD
 
     @cached_property
     @torch.no_grad()
-    def _shuffled_raw_activations_iterator_BTLD(self) -> Iterator[torch.Tensor]:
-        activations_iterator_TLD = self._activations_iterator_TLD()
+    def _shuffled_raw_activations_iterator_BTPD(self) -> Iterator[torch.Tensor]:
+        activations_iterator_TPD = self._activations_iterator_TPD()
 
         # shuffle these token activations, so that we eliminate high feature correlations inside sequences
-        shuffled_activations_iterator_BTLD = batch_shuffle_tensor_iterator_BX(
-            tensor_iterator_X=activations_iterator_TLD,
+        shuffled_activations_iterator_BTPD = batch_shuffle_tensor_iterator_BX(
+            tensor_iterator_X=activations_iterator_TPD,
             shuffle_buffer_size=self._activations_shuffle_buffer_size,
             yield_batch_size=self._yield_batch_size,
             name="llm activations",
         )
 
-        return shuffled_activations_iterator_BTLD
+        return shuffled_activations_iterator_BTPD
 
     @cached_property
     @torch.no_grad()
-    def _shuffled_activations_iterator_BTLD(self) -> Iterator[torch.Tensor]:
-        raw_activations_iterator_BTLD = self._shuffled_raw_activations_iterator_BTLD
-        scaling_factors_TL1 = rearrange(self.get_norm_scaling_factors_TL(), "t l -> t l 1")
-        for unscaled_example_BTLD in raw_activations_iterator_BTLD:
-            yield unscaled_example_BTLD * scaling_factors_TL1
+    def _shuffled_activations_iterator_BTPD(self) -> Iterator[torch.Tensor]:
+        raw_activations_iterator_BTPD = self._shuffled_raw_activations_iterator_BTPD
+        scaling_factors_TP1 = rearrange(self.get_norm_scaling_factors_TP(), "t p -> t p 1")
+        for unscaled_example_BTPD in raw_activations_iterator_BTPD:
+            yield unscaled_example_BTPD * scaling_factors_TP1
 
     def num_batches(self) -> int | None:
         return self._token_sequence_loader.num_batches()
 
-    def batch_shape_BTLD(self) -> tuple[int, int, int, int]:
+    def batch_shape_BTPD(self) -> tuple[int, int, int, int]:
         B = self._yield_batch_size
         T = 2
-        L, D = self.activation_shape_LD
-        return B, T, L, D
+        P, D = self.activation_shape_PD
+        return B, T, P, D
 
-    def get_shuffled_activations_iterator_BTLD(self) -> Iterator[torch.Tensor]:
-        return self._shuffled_activations_iterator_BTLD
+    def get_shuffled_activations_iterator_BTPD(self) -> Iterator[torch.Tensor]:
+        return self._shuffled_activations_iterator_BTPD
 
 
 def build_sliding_window_dataloader(
     cfg: SlidingWindowDataConfig,
+    hookpoints: list[str],
     batch_size: int,
     cache_dir: str,
     device: torch.device,
-) -> BaseTokenLayerActivationsDataloader:
+) -> BaseTokenhookpointActivationsDataloader:
     llms = build_llms(
         cfg.activations_harvester.llms,
         cache_dir,
@@ -146,7 +147,7 @@ def build_sliding_window_dataloader(
     # then, run these sequences through the model to get activations
     activations_harvester = ActivationsHarvester(
         llms=llms,
-        layer_indices_to_harvest=cfg.activations_harvester.layer_indices_to_harvest,
+        hookpoints=hookpoints,
     )
 
     activations_dataloader = SlidingWindowScaledActivationsDataloader(

@@ -78,7 +78,7 @@ class AcausalCrosscoder(SaveableModule, Generic[TActivation]):
     @dataclass
     class TrainResult:
         hidden_BH: t.Tensor
-        reconstructed_acts_BXD: t.Tensor
+        output_BXD: t.Tensor
 
     def forward_train(
         self,
@@ -88,16 +88,16 @@ class AcausalCrosscoder(SaveableModule, Generic[TActivation]):
         self._validate_acts_shape(activation_BXD)
 
         hidden_BH = self._encode_BH(activation_BXD)
-        reconstructed_BXD = self._decode_BXD(hidden_BH)
+        output_BXD = self._decode_BXD(hidden_BH)
 
-        if reconstructed_BXD.shape != activation_BXD.shape:
+        if output_BXD.shape != activation_BXD.shape:
             raise ValueError(
-                f"reconstructed_BXD.shape {reconstructed_BXD.shape} != activation_BXD.shape {activation_BXD.shape}"
+                f"output_BXD.shape {output_BXD.shape} != activation_BXD.shape {activation_BXD.shape}"
             )
 
         return self.TrainResult(
             hidden_BH=hidden_BH,
-            reconstructed_acts_BXD=reconstructed_BXD,
+            output_BXD=output_BXD,
         )
 
     def _validate_acts_shape(self, activation_BXD: t.Tensor) -> None:

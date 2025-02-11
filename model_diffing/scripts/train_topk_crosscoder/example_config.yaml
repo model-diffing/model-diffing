@@ -11,7 +11,6 @@ data:
         revision: step142000
       - name: EleutherAI/pythia-160M
         revision: step143000 # last checkpoint
-    layer_indices_to_harvest: [2]
     harvesting_batch_size: 32
   activations_shuffle_buffer_size: 8_192
 crosscoder:
@@ -27,3 +26,4 @@ train:
   log_every_n_steps: 20
 experiment_name: topk_crosscoder_pythia_160M_layer_2
 wandb: true
+mlp_indices: [7]

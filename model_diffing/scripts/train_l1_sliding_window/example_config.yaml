@@ -10,7 +10,6 @@ data:
     llms:
       - name: EleutherAI/pythia-160M
         revision: step143000 # last checkpoint
-    layer_indices_to_harvest: [0, 1, 2]
     harvesting_batch_size: 4
   activations_shuffle_buffer_size: 8_192
   token_window_size: 2
@@ -30,3 +29,7 @@ train:
 
 experiment_name: sliding_window_test
 wandb: true
+hookpoints:
+  - "blocks.0.hook_resid_post"
+  - "blocks.1.hook_resid_post"
+  - "blocks.2.hook_resid_post"

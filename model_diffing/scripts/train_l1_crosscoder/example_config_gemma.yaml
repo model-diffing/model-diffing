@@ -7,7 +7,6 @@ data:
     llms:
       - name: google/gemma-2-2b
       - name: google/gemma-2-2b-it
-    layer_indices_to_harvest: [13]
     harvesting_batch_size: 512
   activations_shuffle_buffer_size: 8_192
 crosscoder:
@@ -22,5 +21,6 @@ train:
   num_steps: 10_000
   save_every_n_steps: 1000
   log_every_n_steps: 20
-experiment_name: l1_crosscoder_gemma_2_2b_layer_13
+experiment_name: l1_crosscoder_gemma_2_2b_hookpoint_13
 wandb: true
+hookpoints: ["blocks.13.hook_resid_post"]

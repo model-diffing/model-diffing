@@ -77,23 +77,23 @@ def l2_norm(
 
 
 def weighted_l1_sparsity_loss(
-    W_dec_HTMLD: torch.Tensor,
+    W_dec_HTMPD: torch.Tensor,
     hidden_BH: torch.Tensor,
-    layer_reduction: Reduction,  # type: ignore
+    hookpoint_reduction: Reduction,  # type: ignore
     model_reduction: Reduction,  # type: ignore
     token_reduction: Reduction,  # type: ignore
 ) -> torch.Tensor:
     assert (hidden_BH >= 0).all()
-    # think about it like: each latent (called "hidden" here) has a separate projection onto each (model, layer)
-    # so we have a separate l2 norm for each (hidden, model, layer)
-    W_dec_l2_norms_HML = reduce(W_dec_HTMLD, "hidden token model layer dim -> hidden token model layer", l2_norm)
+    # think about it like: each latent (called "hidden" here) has a separate projection onto each (model, hookpoint)
+    # so we have a separate l2 norm for each (hidden, model, hookpoint)
+    W_dec_l2_norms_HTMP = reduce(W_dec_HTMPD, "hidden token model hookpoint dim -> hidden token model hookpoint", l2_norm)
 
-    # to get the weighting factor for each latent, we reduce it's decoder norms for each (model, layer)
+    # to get the weighting factor for each latent, we reduce it's decoder norms for each (model, hookpoint)
     reduced_norms_H = multi_reduce(
-        W_dec_l2_norms_HML,
-        "hidden token model layer",
+        W_dec_l2_norms_HTMP,
+        "hidden token model hookpoint",
         ("token", token_reduction),
-        ("layer", layer_reduction),
+        ("hookpoint", hookpoint_reduction),
         ("model", model_reduction),
     )
 
@@ -106,24 +106,25 @@ def weighted_l1_sparsity_loss(
 sparsity_loss_l2_of_norms = partial(
     weighted_l1_sparsity_loss,
     token_reduction=l2_norm,
-    layer_reduction=l2_norm,
+    hookpoint_reduction=l2_norm,
     model_reduction=l2_norm,
 )
 
 sparsity_loss_l1_of_norms = partial(
     weighted_l1_sparsity_loss,
     token_reduction=l1_norm,
-    layer_reduction=l1_norm,
+    hookpoint_reduction=l1_norm,
     model_reduction=l1_norm,
 )
 
 
 def calculate_reconstruction_loss(activation_BXD: torch.Tensor, target_BXD: torch.Tensor) -> torch.Tensor:
-    """This is a little weird because we have both model and layer dimensions, so it's worth explaining deeply:
+    """This is a little weird because we have both model and hookpoint (aka layer) dimensions, so it's worth explaining deeply:
 
     The reconstruction loss is a sum of squared L2 norms of the error for each activation space being reconstructed.
     In the Anthropic crosscoders update, they don't write for the multiple-model case, they write it as:
 
+    (using l here for layer, hookpoint is technically more correct):
     $$\\sum_{l \\in L} \\|a^l(x_j) - a^{l'}(x_j)\\|^2$$
 
     Here, I'm assuming we want to expand that sum to be over models, so we would have:
@@ -167,7 +168,7 @@ def calculate_explained_variance_X(
     reconstructed_BXD: torch.Tensor,
     eps: float = 1e-8,
 ) -> torch.Tensor:
-    """for each model and layer, calculate the mean explained variance inside each d_model feature space"""
+    """for each model and hookpoint, calculate the mean explained variance inside each d_model feature space"""
     error_BXD = activations_BXD - reconstructed_BXD
 
     mean_error_var_X = error_BXD.var(-1).mean(0)
@@ -182,11 +183,11 @@ def get_explained_var_dict(
 ) -> dict[str, float]:
     """
     crosscoding_dims is a list of tuples, each tuple is:
-        1: the name of the crosscoding dimension ('layer', 'model', 'token', etc.)
+        1: the name of the crosscoding dimension ('hookpoint', 'model', 'token', etc.)
         2: the labels of the crosscoding dimension (e.g. [0, 1, 7] or ['gpt2', 'gpt3', 'gpt4'], or ['<bos>', '-1', 'self'])
 
     the reason we need the explicit naming pattern is that often indices are not helpful. For example, when training
-    a crosscoder on layers 2, 5, and 8, you don't to want to have them labeled [0, 1, 2]. i.e. you need to know what
+    a crosscoder on hookpoints 2, 5, and 8, you don't to want to have them labeled [0, 1, 2]. i.e. you need to know what
     each index means.
     """
 
