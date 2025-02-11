@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 import fire  # type: ignore
 import torch
 from einops import rearrange
@@ -12,7 +14,7 @@ from model_diffing.scripts.llms import build_llms
 from model_diffing.scripts.train_jan_update_crosscoder.config import JanUpdateExperimentConfig, JumpReLUConfig
 from model_diffing.scripts.train_jan_update_crosscoder.trainer import JanUpdateCrosscoderTrainer
 from model_diffing.scripts.utils import build_wandb_run
-from model_diffing.utils import get_device, inspect
+from model_diffing.utils import get_device, inspect, round_up
 
 
 def build_jan_update_crosscoder_trainer(cfg: JanUpdateExperimentConfig) -> JanUpdateCrosscoderTrainer:
@@ -29,17 +31,18 @@ def build_jan_update_crosscoder_trainer(cfg: JanUpdateExperimentConfig) -> JanUp
         cfg=cfg.data,
         llms=llms,
         hookpoints=cfg.hookpoints,
-        hookpoint_dim=llms[0].cfg.d_model,
         batch_size=cfg.train.batch_size,
         cache_dir=cfg.cache_dir,
         device=device,
     )
-    _, n_models, n_hookpoints, d_model = dataloader.batch_shape_BMPD()
+
+    n_models = len(llms)
+    n_hookpoints = len(cfg.hookpoints)
 
     crosscoder = _build_jan_update_crosscoder(
         n_models=n_models,
         n_hookpoints=n_hookpoints,
-        d_model=d_model,
+        d_model=llms[0].cfg.d_model,
         cc_hidden_dim=cfg.crosscoder.hidden_dim,
         jumprelu=cfg.crosscoder.jumprelu,
         data_loader=dataloader,
@@ -101,8 +104,8 @@ def _build_jan_update_crosscoder(
         )
 
         # raise ValueError("need to fix this: 10000/m, not 1/10000")
-        calibrated_b_enc_H = _compute_b_enc_H(
-            data_loader,
+        calibrated_b_enc_H = compute_b_enc_H(
+            data_loader.get_shuffled_activations_iterator_BMPD(),
             cc.W_enc_XDH,
             cc.hidden_activation.log_threshold_H.exp(),
             device,
@@ -117,9 +120,9 @@ def _build_jan_update_crosscoder(
     return cc
 
 
-def _compute_b_enc_H(
-    data_loader: BaseModelHookpointActivationsDataloader,
-    W_enc_MPDH: torch.Tensor,
+def compute_b_enc_H(
+    activations_iterator_BXD: Iterator[torch.Tensor],
+    W_enc_XDH: torch.Tensor,
     initial_jumprelu_threshold_H: torch.Tensor,
     device: torch.device,
     n_examples_to_sample: int = 100_000,
@@ -127,7 +130,7 @@ def _compute_b_enc_H(
 ) -> torch.Tensor:
     logger.info(f"Harvesting pre-bias for {n_examples_to_sample} examples")
 
-    pre_bias_NH = _harvest_pre_bias_NH(data_loader, W_enc_MPDH, device, n_examples_to_sample)
+    pre_bias_NH = harvest_pre_bias_NH(activations_iterator_BXD, W_enc_XDH, device, n_examples_to_sample)
 
     # find the threshold for each idx H such that 1/10_000 of the examples are above the threshold
     quantile_H = torch.quantile(pre_bias_NH, 1 - 1 / firing_sparsity, dim=0)
@@ -142,43 +145,39 @@ def _compute_b_enc_H(
     return b_enc_H
 
 
-def _harvest_pre_bias_NH(
-    data_loader: BaseModelHookpointActivationsDataloader,
-    W_enc_MPDH: torch.Tensor,
+def harvest_pre_bias_NH(
+    activations_iterator_BXD: Iterator[torch.Tensor],
+    W_enc_XDH: torch.Tensor,
     device: torch.device,
     n_examples_to_sample: int,
 ) -> torch.Tensor:
-    batch_size = data_loader.batch_shape_BMPD()[0]
 
-    remainder = n_examples_to_sample % batch_size
-    if remainder != 0:
-        logger.warning(
-            f"n_examples_to_sample {n_examples_to_sample} must be divisible by the batch "
-            f"size {batch_size}. Rounding up to the nearest multiple of batch_size."
-        )
-        # Round up to the nearest multiple of batch_size:
-        n_examples_to_sample = (((n_examples_to_sample - remainder) // batch_size) + 1) * batch_size
-
-        logger.info(f"n_examples_to_sample is now {n_examples_to_sample}")
-
-    num_batches = n_examples_to_sample // batch_size
-
-    activations_iterator_BMPD = data_loader.get_shuffled_activations_iterator_BMPD()
+    # activations_iterator_BMPD = data_loader.get_shuffled_activations_iterator_BMPD()
 
     def get_batch_pre_bias() -> torch.Tensor:
         # this is essentially the first step of the crosscoder forward pass, but not worth
         # creating a new method for it, just (easily) reimplementing it here
-        batch_BMPD = next(activations_iterator_BMPD)
-        x_BH = torch.einsum("b m p d, m p d h -> b h", batch_BMPD, W_enc_MPDH)
+        batch_BXD = next(activations_iterator_BXD)
+        x_BH = torch.einsum("b ... d, ... d h -> b h", batch_BXD, W_enc_XDH)
         return x_BH
 
-    first_sample_BH = get_batch_pre_bias()
-    hidden_size = first_sample_BH.shape[1]
+    sample_BH = get_batch_pre_bias()
+    batch_size, hidden_size = sample_BH.shape
 
-    pre_bias_buffer_NH = torch.empty(n_examples_to_sample, hidden_size, device=device)
+    rounded_n_examples_to_sample = round_up(n_examples_to_sample, to_multiple_of=batch_size)
+
+    if rounded_n_examples_to_sample > n_examples_to_sample:
+        logger.warning(
+            f"rounded n_examples_to_sample from {n_examples_to_sample} to {rounded_n_examples_to_sample} "
+            f"to be divisible by the batch size {batch_size}"
+        )
+
+    num_batches = rounded_n_examples_to_sample // batch_size
+
+    pre_bias_buffer_NH = torch.empty(rounded_n_examples_to_sample, hidden_size, device=device)
     logger.info(f"pre_bias_buffer_NH: {inspect(pre_bias_buffer_NH)}")
 
-    pre_bias_buffer_NH[:batch_size] = first_sample_BH
+    pre_bias_buffer_NH[:batch_size] = sample_BH
 
     for i in tqdm(
         range(1, num_batches), desc="Harvesting pre-bias"

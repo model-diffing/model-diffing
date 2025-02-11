@@ -14,8 +14,8 @@ from wandb.sdk.wandb_run import Run
 from model_diffing.data.token_hookpoint_dataloader import BaseTokenhookpointActivationsDataloader
 from model_diffing.log import logger
 from model_diffing.models.activations.relu import ReLUActivation
+from model_diffing.models.crosscoder import AcausalCrosscoder
 from model_diffing.scripts.base_trainer import save_config, save_model, validate_num_steps_per_epoch
-from model_diffing.scripts.train_jumprelu_sliding_window.run import TokenhookpointCrosscoder
 from model_diffing.scripts.train_l1_crosscoder.config import L1TrainConfig
 from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer
 from model_diffing.utils import (
@@ -30,6 +30,32 @@ from model_diffing.utils import (
 )
 
 TAct = TypeVar("TAct", bound=SaveableModule)
+
+
+class TokenhookpointCrosscoder(AcausalCrosscoder[TAct], Generic[TAct]):
+    def __init__(
+        self,
+        token_window_size: int,
+        n_hookpoints: int,
+        d_model: int,
+        hidden_dim: int,
+        dec_init_norm: float,
+        hidden_activation: TAct,
+    ):
+        super().__init__(
+            crosscoding_dims=(token_window_size, n_hookpoints),
+            d_model=d_model,
+            hidden_dim=hidden_dim,
+            dec_init_norm=dec_init_norm,
+            hidden_activation=hidden_activation,
+        )
+        self.W_enc_TPDH = self.W_enc_XDH
+        self.W_dec_HTPD = self.W_dec_HXD
+        self.b_dec_TPD = self.b_dec_XD
+
+        assert self.W_enc_TPDH.shape == (token_window_size, n_hookpoints, d_model, hidden_dim)
+        assert self.W_dec_HTPD.shape == (hidden_dim, token_window_size, n_hookpoints, d_model)
+        assert self.b_dec_TPD.shape == (token_window_size, n_hookpoints, d_model)
 
 
 class BiTokenCCWrapper(nn.Module, Generic[TAct]):

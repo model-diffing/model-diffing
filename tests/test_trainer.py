@@ -46,9 +46,6 @@ class FakeActivationsDataloader(BaseModelHookpointActivationsDataloader):
                 dtype=torch.float32,
             )
 
-    def batch_shape_BMPD(self) -> tuple[int, int, int, int]:
-        return (self._batch_size, self._n_models, self._n_hookpoints, self._d_model)
-
     def num_batches(self) -> int | None:
         return self._num_batches
 

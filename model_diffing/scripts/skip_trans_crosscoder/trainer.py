@@ -20,25 +20,24 @@ from model_diffing.utils import calculate_explained_variance_X, calculate_recons
 
 class TopkSkipTransCrosscoderTrainer(BaseModelHookpointTrainer[BaseTrainConfig, TopkActivation]):
     def _train_step(self, batch_BMPD: torch.Tensor) -> None:
+        self.optimizer.zero_grad()
+
         # hookpoints alternate between input and output
         assert batch_BMPD.shape[2] % 2 == 0, "we should have an even number of hookpoints for this trainer"
         batch_x_BMPiD = batch_BMPD[:, :, ::2]
         batch_y_BMPoD = batch_BMPD[:, :, 1::2]
 
-        self.optimizer.zero_grad()
-
-        # fwd
         train_res = self.crosscoder.forward_train(batch_x_BMPiD)
 
-        # losses
         reconstruction_loss = calculate_reconstruction_loss(train_res.output_BXD, batch_y_BMPoD)
 
-        # backward
         reconstruction_loss.backward()
         clip_grad_norm_(self.crosscoder.parameters(), 1.0)
         self.optimizer.step()
         assert len(self.optimizer.param_groups) == 1, "sanity check failed"
         self.optimizer.param_groups[0]["lr"] = self.lr_scheduler(self.step)
+
+        self.firing_tracker.add_batch(train_res.hidden_BH)
 
         if (
             self.wandb_run is not None
@@ -56,6 +55,7 @@ class TopkSkipTransCrosscoderTrainer(BaseModelHookpointTrainer[BaseTrainConfig, 
                 "train/unique_tokens_trained": self.unique_tokens_trained,
                 "train/learning_rate": self.optimizer.param_groups[0]["lr"],
                 "train/reconstruction_loss": reconstruction_loss.item(),
+                "train/firing_percentages": self.get_firing_percentage_hist(),
                 **explained_variance_dict,
             }
 

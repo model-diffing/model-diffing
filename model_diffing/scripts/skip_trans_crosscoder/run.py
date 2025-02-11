@@ -30,15 +30,12 @@ def build_trainer(cfg: TopkSkipTransCrosscoderExperimentConfig) -> TopkSkipTrans
         dtype=cfg.data.activations_harvester.inference_dtype,
     )
 
-    hookpoint_dim = llms[0].cfg.d_mlp
-
     dataloader = cast(
         ScaledModelHookpointActivationsDataloader,
         build_dataloader(
             cfg=cfg.data,
             llms=llms,
             hookpoints=hookpoints,
-            hookpoint_dim=hookpoint_dim,
             batch_size=cfg.train.batch_size,
             cache_dir=cfg.cache_dir,
             device=device,
@@ -56,10 +53,11 @@ def build_trainer(cfg: TopkSkipTransCrosscoderExperimentConfig) -> TopkSkipTrans
 
     crosscoder = AcausalCrosscoder(
         crosscoding_dims=crosscoding_dims,
-        d_model=hookpoint_dim,
+        d_model=llms[0].cfg.d_mlp,
         hidden_dim=cfg.crosscoder.hidden_dim,
         dec_init_norm=cfg.crosscoder.dec_init_norm,
         hidden_activation=TopkActivation(k=cfg.crosscoder.k),
+        skip_linear=True,
     )
 
     crosscoder = crosscoder.to(device)

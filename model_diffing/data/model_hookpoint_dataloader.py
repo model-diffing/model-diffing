@@ -11,16 +11,12 @@ from model_diffing.data.activation_harvester import ActivationsHarvester
 from model_diffing.data.shuffle import batch_shuffle_tensor_iterator_BX
 from model_diffing.data.token_loader import TokenSequenceLoader, build_tokens_sequence_loader
 from model_diffing.scripts.config_common import DataConfig
-from model_diffing.scripts.llms import build_llms
 from model_diffing.scripts.utils import estimate_norm_scaling_factor_X
 
 
 class BaseModelHookpointActivationsDataloader(ABC):
     @abstractmethod
     def get_shuffled_activations_iterator_BMPD(self) -> Iterator[torch.Tensor]: ...
-
-    @abstractmethod
-    def batch_shape_BMPD(self) -> tuple[int, int, int, int]: ...
 
     @abstractmethod
     def num_batches(self) -> int | None: ...
@@ -87,12 +83,6 @@ class ScaledModelHookpointActivationsDataloader(BaseModelHookpointActivationsDat
     def num_batches(self) -> int | None:
         return self._token_sequence_loader.num_batches()
 
-    def batch_shape_BMPD(self) -> tuple[int, int, int, int]:
-        return (
-            self._yield_batch_size,
-            *self._activations_harvester.activation_shape_MPD,
-        )
-
     def get_shuffled_activations_iterator_BMPD(self) -> Iterator[torch.Tensor]:
         return self._shuffled_activations_iterator_BMPD
 
@@ -101,12 +91,10 @@ def build_dataloader(
     cfg: DataConfig,
     llms: list[HookedTransformer],
     hookpoints: list[str],
-    hookpoint_dim: int,
     batch_size: int,
     cache_dir: str,
     device: torch.device,
 ) -> BaseModelHookpointActivationsDataloader:
-
     tokenizer = llms[0].tokenizer
     if not isinstance(tokenizer, PreTrainedTokenizerBase):
         raise ValueError("Tokenizer is not a PreTrainedTokenizerBase")
@@ -123,7 +111,6 @@ def build_dataloader(
     activations_harvester = ActivationsHarvester(
         llms=llms,
         hookpoints=hookpoints,
-        hookpoint_dim=hookpoint_dim,
     )
 
     activations_dataloader = ScaledModelHookpointActivationsDataloader(

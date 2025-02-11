@@ -51,7 +51,7 @@ device = get_device()
 llms = build_llms(llm_configs, cache_dir, device, dtype=activations_harvester_config.inference_dtype)
 
 # %%
-dataloader = build_dataloader(data_config, llms, hookpoints, llms[0].cfg.d_model, 16, cache_dir, device)
+dataloader = build_dataloader(data_config, llms, hookpoints, 16, cache_dir, device)
 
 # %%
 sample_BMPD = next(dataloader.get_shuffled_activations_iterator_BMPD())

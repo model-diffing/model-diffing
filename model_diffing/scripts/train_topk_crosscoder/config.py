@@ -12,3 +12,4 @@ class TopKExperimentConfig(BaseExperimentConfig):
     data: DataConfig
     crosscoder: TopKCrosscoderConfig
     train: BaseTrainConfig
+    hookpoints: list[str]

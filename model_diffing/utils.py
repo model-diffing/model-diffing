@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from functools import partial
 from itertools import product
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import einops
 import torch
@@ -24,7 +24,7 @@ class SaveableModule(nn.Module, ABC):
 
     @classmethod
     @abstractmethod
-    def _from_cfg(cls, cfg: dict[str, Any]) -> "SaveableModule": ...
+    def _from_cfg(cls: type[Self], cfg: dict[str, Any]) -> Self: ...
 
     def save(self, basepath: Path):
         basepath.mkdir(parents=True, exist_ok=True)
@@ -33,12 +33,19 @@ class SaveableModule(nn.Module, ABC):
             yaml.dump(self._dump_cfg(), f)
 
     @classmethod
-    def load(cls, basepath: Path):
+    def load(cls: type[Self], basepath: Path) -> Self:
         with open(basepath / "model.cfg") as f:
             cfg = yaml.safe_load(f)
             model = cls._from_cfg(cfg)
-        model.load_state_dict(torch.load(basepath / "model.pt"))
+        model.load_state_dict(torch.load(basepath / "model.pt", weights_only=True))
         return model
+
+# Add a custom constructor for the !!python/tuple tag,
+# converting the loaded sequence to a Python tuple.
+def _tuple_constructor(loader: yaml.SafeLoader, node: yaml.nodes.SequenceNode) -> tuple[Any, ...]:
+    return tuple(loader.construct_sequence(node))
+
+yaml.SafeLoader.add_constructor('tag:yaml.org,2002:python/tuple', _tuple_constructor)
 
 
 # might seem strange to redefine these but:
@@ -230,3 +237,9 @@ def size_human_readable(tensor: torch.Tensor) -> str:
 # hacky but useful for debugging
 def inspect(tensor: torch.Tensor) -> str:
     return f"{tensor.shape}, dtype={tensor.dtype}, device={tensor.device}, size={size_human_readable(tensor)}"
+
+def round_up(x: int, to_multiple_of: int) -> int:
+    remainder = x % to_multiple_of
+    if remainder != 0:
+        x = (((x - remainder) // to_multiple_of) + 1) * to_multiple_of
+    return x

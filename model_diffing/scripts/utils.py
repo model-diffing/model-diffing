@@ -51,8 +51,8 @@ def create_cosine_sim_and_relative_norm_histograms(
     return plots
 
 
-def wandb_histogram(data_X: torch.Tensor) -> wandb.Histogram:
-    return wandb.Histogram(np_histogram=np.histogram(data_X.detach().cpu().numpy()))
+def wandb_histogram(data_X: torch.Tensor, bins: int = 100) -> wandb.Histogram:
+    return wandb.Histogram(np_histogram=np.histogram(data_X.detach().cpu().numpy(), bins=bins))
 
 
 def build_wandb_run(config: BaseExperimentConfig) -> Run | None:

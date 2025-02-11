@@ -1,10 +1,8 @@
-from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path
 from typing import Any
 
 import torch as t
-import torch.nn as nn
 from torch.nn.utils import clip_grad_norm_
 from tqdm import tqdm  # type: ignore
 from wandb.sdk.wandb_run import Run
@@ -12,9 +10,9 @@ from wandb.sdk.wandb_run import Run
 from model_diffing.data.token_hookpoint_dataloader import BaseTokenhookpointActivationsDataloader
 from model_diffing.log import logger
 from model_diffing.models.activations.jumprelu import JumpReLUActivation
-from model_diffing.models.crosscoder import AcausalCrosscoder
 from model_diffing.scripts.base_trainer import save_config, save_model, validate_num_steps_per_epoch
 from model_diffing.scripts.train_jan_update_crosscoder.config import JanUpdateTrainConfig
+from model_diffing.scripts.train_l1_sliding_window.trainer import BiTokenCCWrapper
 from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer, wandb_histogram
 from model_diffing.utils import (
     calculate_explained_variance_X,
@@ -25,57 +23,12 @@ from model_diffing.utils import (
 )
 
 
-class BiTokenCCWrapper(nn.Module):
-    def __init__(
-        self,
-        single_token_cc: AcausalCrosscoder[JumpReLUActivation],
-        double_token_cc: AcausalCrosscoder[JumpReLUActivation],
-    ):
-        super().__init__()
-
-        assert single_token_cc.crosscoding_dims[0] == 1  # token
-        assert len(single_token_cc.crosscoding_dims) == 2  # (token, hookpoint)
-        self.single_cc = single_token_cc
-
-        assert double_token_cc.crosscoding_dims[0] == 2  # token
-        assert len(double_token_cc.crosscoding_dims) == 2  # (token, hookpoint)
-        self.double_cc = double_token_cc
-
-    @dataclass
-    class TrainResult:
-        tok1_recon_B1PD: t.Tensor
-        tok2_recon_B1PD: t.Tensor
-        tok1_hidden_BH: t.Tensor
-        tok2_hidden_BH: t.Tensor
-        both_recon_B2PD: t.Tensor
-        both_hidden_BH: t.Tensor
-
-    def forward_train(self, x_BTPD: t.Tensor) -> TrainResult:
-        assert x_BTPD.shape[1] == 2
-
-        output_tok1 = self.single_cc.forward_train(x_BTPD[:, 0][:, None])
-        output_tok2 = self.single_cc.forward_train(x_BTPD[:, 1][:, None])
-        output_both = self.double_cc.forward_train(x_BTPD)
-
-        return self.TrainResult(
-            tok1_recon_B1PD=output_tok1.output_BXD,
-            tok2_recon_B1PD=output_tok2.output_BXD,
-            tok1_hidden_BH=output_tok1.hidden_BH,
-            tok2_hidden_BH=output_tok2.hidden_BH,
-            both_recon_B2PD=output_both.output_BXD,
-            both_hidden_BH=output_both.hidden_BH,
-        )
-
-    def forward(self, x_BTPD: t.Tensor) -> t.Tensor:
-        return t.Tensor(0)
-
-
 class JumpreluSlidingWindowCrosscoderTrainer:
     def __init__(
         self,
         cfg: JanUpdateTrainConfig,
         activations_dataloader: BaseTokenhookpointActivationsDataloader,
-        crosscoders: BiTokenCCWrapper,
+        crosscoders: BiTokenCCWrapper[JumpReLUActivation],
         wandb_run: Run | None,
         device: t.device,
         hookpoints: list[str],
@@ -144,13 +97,13 @@ class JumpreluSlidingWindowCrosscoderTrainer:
         # fwd
         res = self.crosscoders.forward_train(batch_BTPD)
 
-        reconstructed_acts_BTPD = t.cat([res.tok1_recon_B1PD, res.tok2_recon_B1PD], dim=1) + res.both_recon_B2PD
+        reconstructed_acts_BTPD = t.cat([res.recon_B1PD_single1, res.recon_B1PD_single2], dim=1) + res.recon_B2PD_double
         assert reconstructed_acts_BTPD.shape == batch_BTPD.shape, "fuck"
 
         # losses
         reconstruction_loss = calculate_reconstruction_loss(batch_BTPD, reconstructed_acts_BTPD)
 
-        hidden_B3H = t.cat([res.tok1_hidden_BH, res.both_hidden_BH, res.tok2_hidden_BH], dim=-1)
+        hidden_B3H = t.cat([res.hidden_BH_single1, res.hidden_BH_double, res.hidden_BH_single2], dim=-1)
 
         decoder_norms_single_H = get_decoder_norms_H(self.crosscoders.single_cc.W_dec_HXD)
         decoder_norms_both_H = get_decoder_norms_H(self.crosscoders.double_cc.W_dec_HXD)

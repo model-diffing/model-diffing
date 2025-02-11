@@ -22,23 +22,21 @@ def build_l1_crosscoder_trainer(cfg: L1ExperimentConfig) -> L1CrosscoderTrainer:
         dtype=cfg.data.activations_harvester.inference_dtype,
     )
 
-    hookpoint_dim = llms[0].cfg.d_model
-
     dataloader = build_dataloader(
         cfg=cfg.data,
         llms=llms,
         hookpoints=cfg.hookpoints,
-        hookpoint_dim=hookpoint_dim,
         batch_size=cfg.train.batch_size,
         cache_dir=cfg.cache_dir,
         device=device,
     )
 
-    _, n_models, n_hookpoints, d_model = dataloader.batch_shape_BMPD()
+    n_models = len(llms)
+    n_hookpoints = len(cfg.hookpoints)
 
     crosscoder = AcausalCrosscoder(
         crosscoding_dims=(n_models, n_hookpoints),
-        d_model=d_model,
+        d_model=llms[0].cfg.d_model,
         hidden_dim=cfg.crosscoder.hidden_dim,
         dec_init_norm=cfg.crosscoder.dec_init_norm,
         hidden_activation=ReLUActivation(),

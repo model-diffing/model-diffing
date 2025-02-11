@@ -6,17 +6,17 @@ from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 import torch
+import wandb
 import yaml  # type: ignore
-from torch.optim import Optimizer
-from torch.optim.lr_scheduler import LRScheduler
 from tqdm import tqdm  # type: ignore
 from wandb.sdk.wandb_run import Run
 
 from model_diffing.data.model_hookpoint_dataloader import BaseModelHookpointActivationsDataloader
 from model_diffing.log import logger
 from model_diffing.models.crosscoder import AcausalCrosscoder
-from model_diffing.scripts.config_common import AdamDecayTo0LearningRateConfig, BaseExperimentConfig, BaseTrainConfig
-from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer
+from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainConfig
+from model_diffing.scripts.firing_tracker import FiringTracker
+from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer, wandb_histogram
 from model_diffing.utils import SaveableModule
 
 
@@ -79,9 +79,19 @@ class BaseModelHookpointTrainer(Generic[TConfig, TAct]):
         self.save_dir = Path(cfg.base_save_dir) / experiment_name
         self.save_dir.mkdir(parents=True, exist_ok=True)
 
+        # buffer to track when features activation, used for logging dead features
+        self.firing_tracker = FiringTracker(
+            activation_size=crosscoder.hidden_dim,
+            length=1_000_000,  # TODO(oli): make this dynamic
+            device=self.device,
+        )
+
         self.step = 0
         self.epoch = 0
         self.unique_tokens_trained = 0
+
+    def get_firing_percentage_hist(self) -> wandb.Histogram:
+        return wandb_histogram(self.firing_tracker.firing_percentage_A())
 
     def train(self) -> None:
         save_config(self.cfg, self.save_dir)

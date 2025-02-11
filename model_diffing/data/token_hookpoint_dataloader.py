@@ -4,12 +4,12 @@ from functools import cached_property
 
 import torch
 from einops import rearrange
+from transformer_lens import HookedTransformer
 from transformers import PreTrainedTokenizerBase  # type: ignore  # type: ignore
 
 from model_diffing.data.activation_harvester import ActivationsHarvester
 from model_diffing.data.shuffle import batch_shuffle_tensor_iterator_BX
 from model_diffing.data.token_loader import TokenSequenceLoader, build_tokens_sequence_loader
-from model_diffing.scripts.llms import build_llms
 from model_diffing.scripts.train_jumprelu_sliding_window.config import SlidingWindowDataConfig
 from model_diffing.scripts.utils import estimate_norm_scaling_factor_X
 
@@ -17,9 +17,6 @@ from model_diffing.scripts.utils import estimate_norm_scaling_factor_X
 class BaseTokenhookpointActivationsDataloader(ABC):
     @abstractmethod
     def get_shuffled_activations_iterator_BTPD(self) -> Iterator[torch.Tensor]: ...
-
-    @abstractmethod
-    def batch_shape_BTPD(self) -> tuple[int, int, int, int]: ...
 
     @abstractmethod
     def num_batches(self) -> int | None: ...
@@ -52,12 +49,11 @@ class SlidingWindowScaledActivationsDataloader(BaseTokenhookpointActivationsData
             n_batches_for_norm_estimate=n_batches_for_norm_estimate,
         )
 
-        n_models, n_hookpoints, d_model = self._activations_harvester.activation_shape_MPD
-        if n_models != 1:
+        if self._activations_harvester.num_models != 1:
             raise ValueError(
-                "ActivationHarvester is configured incorrectPy. Should only be harvesting for 1 model for sliding window"
+                "ActivationHarvester is configured incorrectly. "
+                "Should only be harvesting for 1 model for sliding window"
             )
-        self.activation_shape_PD = n_hookpoints, d_model
 
     def get_norm_scaling_factors_TP(self) -> torch.Tensor:
         return self._norm_scaling_factors_TP
@@ -108,30 +104,18 @@ class SlidingWindowScaledActivationsDataloader(BaseTokenhookpointActivationsData
     def num_batches(self) -> int | None:
         return self._token_sequence_loader.num_batches()
 
-    def batch_shape_BTPD(self) -> tuple[int, int, int, int]:
-        B = self._yield_batch_size
-        T = 2
-        P, D = self.activation_shape_PD
-        return B, T, P, D
-
     def get_shuffled_activations_iterator_BTPD(self) -> Iterator[torch.Tensor]:
         return self._shuffled_activations_iterator_BTPD
 
 
 def build_sliding_window_dataloader(
     cfg: SlidingWindowDataConfig,
+    llms: list[HookedTransformer],
     hookpoints: list[str],
     batch_size: int,
     cache_dir: str,
     device: torch.device,
 ) -> BaseTokenhookpointActivationsDataloader:
-    llms = build_llms(
-        cfg.activations_harvester.llms,
-        cache_dir,
-        device,
-        dtype=cfg.activations_harvester.inference_dtype,
-    )
-
     tokenizer = llms[0].tokenizer
     if not isinstance(tokenizer, PreTrainedTokenizerBase):
         raise ValueError("Tokenizer is not a PreTrainedTokenizerBase")
