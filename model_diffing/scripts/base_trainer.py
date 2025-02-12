@@ -107,7 +107,7 @@ class BaseModelHookpointTrainer(Generic[TConfig, TAct]):
 
                 # TODO(oli): get wandb checkpoint saving working
 
-                if self.cfg.save_every_n_steps is not None and self.step % self.cfg.save_every_n_steps == 0:
+                if self.cfg.save_every_n_steps is not None and (self.step + 1) % self.cfg.save_every_n_steps == 0:
                     with self.crosscoder.temporarily_fold_activation_scaling(
                         self.activations_dataloader.get_norm_scaling_factors_MP()
                     ):

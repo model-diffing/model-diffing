@@ -27,7 +27,7 @@ class FakeActivationsDataloader(BaseModelHookpointActivationsDataloader):
         self,
         batch_size: int = 16,
         n_models: int = 1,
-        n_hookpoints: int = 1, # NEXT
+        n_hookpoints: int = 1,
         d_model: int = 16,
         num_batches: int = 100,
     ):

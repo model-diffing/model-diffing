@@ -157,7 +157,7 @@ class L1SlidingWindowCrosscoderTrainer:
 
                 # TODO(oli): get wandb checkpoint saving working
 
-                if self.cfg.save_every_n_steps is not None and self.step % self.cfg.save_every_n_steps == 0:
+                if self.cfg.save_every_n_steps is not None and (self.step + 1) % self.cfg.save_every_n_steps == 0:
                     scaling_factors_TP = self.activations_dataloader.get_norm_scaling_factors_TP()
                     with self.crosscoders.single_cc.temporarily_fold_activation_scaling(
                         scaling_factors_TP.mean(dim=0, keepdim=True)
@@ -220,9 +220,9 @@ class L1SlidingWindowCrosscoderTrainer:
         )
 
         if (
-            self.cfg.log_every_n_steps is not None
-            and self.step % self.cfg.log_every_n_steps == 0
-            and self.wandb_run is not None
+            self.wandb_run is not None
+            and self.cfg.log_every_n_steps is not None
+            and (self.step + 1) % self.cfg.log_every_n_steps == 0
         ):
             # Instead of building a chart with `get_l0_stats`, we compute and log the values as scalars.
             l0_B = l0_norm(hidden_B3H, dim=-1)

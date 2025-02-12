@@ -1,8 +1,3 @@
-from typing import cast
-
-import torch
-from transformers import PreTrainedTokenizerBase  # type: ignore
-
 from model_diffing.data.model_hookpoint_dataloader import (
     ActivationsHarvester,
     ScaledModelHookpointActivationsDataloader,

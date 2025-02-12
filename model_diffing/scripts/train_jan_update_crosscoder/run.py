@@ -151,9 +151,6 @@ def harvest_pre_bias_NH(
     device: torch.device,
     n_examples_to_sample: int,
 ) -> torch.Tensor:
-
-    # activations_iterator_BMPD = data_loader.get_shuffled_activations_iterator_BMPD()
-
     def get_batch_pre_bias() -> torch.Tensor:
         # this is essentially the first step of the crosscoder forward pass, but not worth
         # creating a new method for it, just (easily) reimplementing it here

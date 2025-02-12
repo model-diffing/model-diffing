@@ -1,8 +1,6 @@
-from typing import cast
-
 import fire
 
-from model_diffing.data.model_hookpoint_dataloader import ScaledModelHookpointActivationsDataloader, build_dataloader
+from model_diffing.data.model_hookpoint_dataloader import build_dataloader
 from model_diffing.log import logger
 from model_diffing.models.activations.topk import TopkActivation
 from model_diffing.models.crosscoder import AcausalCrosscoder

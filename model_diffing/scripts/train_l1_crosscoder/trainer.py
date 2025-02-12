@@ -45,7 +45,7 @@ class L1CrosscoderTrainer(BaseModelHookpointTrainer[L1TrainConfig, ReLUActivatio
         if (
             self.wandb_run is not None
             and self.cfg.log_every_n_steps is not None
-            and self.step % self.cfg.log_every_n_steps == 0
+            and (self.step + 1) % self.cfg.log_every_n_steps == 0
         ):
             mean_l0 = l0_norm(train_res.hidden_BH, dim=-1).mean()
 

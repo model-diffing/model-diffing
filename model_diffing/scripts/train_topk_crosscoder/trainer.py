@@ -31,7 +31,7 @@ class TopKTrainer(BaseModelHookpointTrainer[BaseTrainConfig, TopkActivation]):
         if (
             self.wandb_run is not None
             and self.cfg.log_every_n_steps is not None
-            and self.step % self.cfg.log_every_n_steps == 0
+            and (self.step + 1) % self.cfg.log_every_n_steps == 0
         ):
             explained_variance_dict = get_explained_var_dict(
                 calculate_explained_variance_X(batch_BMPD, train_res.output_BXD),

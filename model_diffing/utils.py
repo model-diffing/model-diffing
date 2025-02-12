@@ -40,12 +40,14 @@ class SaveableModule(nn.Module, ABC):
         model.load_state_dict(torch.load(basepath / "model.pt", weights_only=True))
         return model
 
+
 # Add a custom constructor for the !!python/tuple tag,
 # converting the loaded sequence to a Python tuple.
 def _tuple_constructor(loader: yaml.SafeLoader, node: yaml.nodes.SequenceNode) -> tuple[Any, ...]:
     return tuple(loader.construct_sequence(node))
 
-yaml.SafeLoader.add_constructor('tag:yaml.org,2002:python/tuple', _tuple_constructor)
+
+yaml.SafeLoader.add_constructor("tag:yaml.org,2002:python/tuple", _tuple_constructor)
 
 
 # might seem strange to redefine these but:
@@ -93,7 +95,9 @@ def weighted_l1_sparsity_loss(
     assert (hidden_BH >= 0).all()
     # think about it like: each latent (called "hidden" here) has a separate projection onto each (model, hookpoint)
     # so we have a separate l2 norm for each (hidden, model, hookpoint)
-    W_dec_l2_norms_HTMP = reduce(W_dec_HTMPD, "hidden token model hookpoint dim -> hidden token model hookpoint", l2_norm)
+    W_dec_l2_norms_HTMP = reduce(
+        W_dec_HTMPD, "hidden token model hookpoint dim -> hidden token model hookpoint", l2_norm
+    )
 
     # to get the weighting factor for each latent, we reduce it's decoder norms for each (model, hookpoint)
     reduced_norms_H = multi_reduce(
@@ -237,6 +241,7 @@ def size_human_readable(tensor: torch.Tensor) -> str:
 # hacky but useful for debugging
 def inspect(tensor: torch.Tensor) -> str:
     return f"{tensor.shape}, dtype={tensor.dtype}, device={tensor.device}, size={size_human_readable(tensor)}"
+
 
 def round_up(x: int, to_multiple_of: int) -> int:
     remainder = x % to_multiple_of
