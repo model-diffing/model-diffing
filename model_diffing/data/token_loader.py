@@ -22,6 +22,14 @@ class TokensSequenceBatch:
         if self.special_tokens_mask_BS.sum() / self.special_tokens_mask_BS.numel() > 0.1:
             logger.warning("more than 10% of tokens are special tokens, this is unexpected")
 
+        if self.tokens_BS.dtype != torch.long:
+            raise ValueError(f"tokens_BS should be a long tensor, got {self.tokens_BS.dtype}")
+
+        if self.special_tokens_mask_BS.dtype != torch.bool:
+            raise ValueError(
+                f"special_tokens_mask_BS should be a boolean tensor, got {self.special_tokens_mask_BS.dtype}"
+            )
+
 
 class TokenSequenceLoader(ABC):
     @abstractmethod

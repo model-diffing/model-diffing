@@ -32,20 +32,12 @@ class ActivationsHarvester:
         return name in self.names_set
 
     def _get_model_activations_BSPD(self, model: HookedTransformer, sequence_BS: torch.Tensor) -> torch.Tensor:
-        # B, S = sequence_BS.shape
         _, cache = model.run_with_cache(sequence_BS, names_filter=self._names_filter)
-        # cache[name] is shape BSD
+        # cache[name] is shape BSD, so stacking on dim 2 = BSPD
         activations_BSPD = torch.stack([cache[name] for name in self._hookpoints], dim=2)  # adds hookpoint dim (P)
         return activations_BSPD
 
-        # cropped_activations_BSPD = activations_BSPD[:, 1:, :, :]  # remove BOS, need
-        # assert cropped_activations_BSPD.shape[:-1] == (B, S - 1, self._num_hookpoints)
-        # return cropped_activations_BSPD
-
     def get_activations_BSMPD(self, sequence_BS: torch.Tensor) -> torch.Tensor:
-        # B, S = sequence_BS.shape
         activations = [self._get_model_activations_BSPD(model, sequence_BS) for model in self._llms]
         activations_BSMPD = torch.stack(activations, dim=2)
-
-        # assert activations_BSMPD.shape[:-1] == (B, S - 1, self.num_models, self._num_hookpoints)
         return activations_BSMPD
