@@ -1,5 +1,6 @@
 from collections.abc import Callable, Iterator
 from itertools import islice
+from typing import Any
 
 import numpy as np
 import torch
@@ -51,8 +52,10 @@ def create_cosine_sim_and_relative_norm_histograms(
     return plots
 
 
-def wandb_histogram(data_X: torch.Tensor, bins: int = 100) -> wandb.Histogram:
-    return wandb.Histogram(np_histogram=np.histogram(data_X.detach().cpu().numpy(), bins=bins))
+def wandb_histogram(data_X: torch.Tensor | np.ndarray[Any, Any], bins: int = 100) -> wandb.Histogram:
+    if isinstance(data_X, torch.Tensor):
+        data_X = data_X.detach().cpu().numpy()
+    return wandb.Histogram(np_histogram=np.histogram(data_X, bins=bins))
 
 
 def build_wandb_run(config: BaseExperimentConfig) -> Run | None:

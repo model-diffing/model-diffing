@@ -82,8 +82,8 @@ class BaseModelHookpointTrainer(Generic[TConfig, TAct]):
         # buffer to track when features activation, used for logging dead features
         self.firing_tracker = FiringTracker(
             activation_size=crosscoder.hidden_dim,
-            length=1_000_000,  # TODO(oli): make this dynamic
-            device=self.device,
+            # length=1_000_000,  # TODO(oli): make this dynamic
+            # device=self.device,
         )
 
         self.step = 0
@@ -91,7 +91,7 @@ class BaseModelHookpointTrainer(Generic[TConfig, TAct]):
         self.unique_tokens_trained = 0
 
     def get_firing_percentage_hist(self) -> wandb.Histogram:
-        return wandb_histogram(self.firing_tracker.firing_percentage_A())
+        return wandb_histogram(self.firing_tracker.steps_since_fired_A)
 
     def train(self) -> None:
         save_config(self.cfg, self.save_dir)

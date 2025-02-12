@@ -37,7 +37,7 @@ class TopkSkipTransCrosscoderTrainer(BaseModelHookpointTrainer[BaseTrainConfig, 
         assert len(self.optimizer.param_groups) == 1, "sanity check failed"
         self.optimizer.param_groups[0]["lr"] = self.lr_scheduler(self.step)
 
-        self.firing_tracker.add_batch(train_res.hidden_BH)
+        self.firing_tracker.add_batch(train_res.hidden_BH.detach().cpu().numpy() > 0)
 
         if (
             self.wandb_run is not None
