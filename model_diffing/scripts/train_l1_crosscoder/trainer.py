@@ -24,13 +24,13 @@ class AnthropicTransposeInit(InitStrategy[Any]):
         self.dec_init_norm = dec_init_norm
 
     @torch.no_grad()
-    def __call__(self, cc: AcausalCrosscoder[Any]) -> None:
-        cc.W_dec_HXD.data = torch.randn_like(cc.W_dec_HXD)
+    def init_weights(self, cc: AcausalCrosscoder[Any]) -> None:
+        cc.W_dec_HXD[:] = torch.randn_like(cc.W_dec_HXD)
         W_dec_norm_HX1 = l2_norm(cc.W_dec_HXD, dim=-1, keepdim=True)
         cc.W_dec_HXD.data.div_(W_dec_norm_HX1)
         cc.W_dec_HXD.data.mul_(self.dec_init_norm)
 
-        cc.W_enc_XDH.data = rearrange(cc.W_dec_HXD.clone(), "h ... d -> ... d h")
+        cc.W_enc_XDH[:] = rearrange(cc.W_dec_HXD.clone(), "h ... d -> ... d h")
 
         cc.b_enc_H.zero_()
         cc.b_dec_XD.zero_()

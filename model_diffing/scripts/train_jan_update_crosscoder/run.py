@@ -109,7 +109,7 @@ class JanUpdateInitStrategy(InitStrategy[JumpReLUActivation]):
         self.n_examples_to_sample = n_examples_to_sample
         self.firing_sparsity = firing_sparsity
 
-    def __call__(self, cc: AcausalCrosscoder[JumpReLUActivation]) -> None:
+    def init_weights(self, cc: AcausalCrosscoder[JumpReLUActivation]) -> None:
         n = prod(cc.crosscoding_dims) * cc.d_model
         m = cc.hidden_dim
 

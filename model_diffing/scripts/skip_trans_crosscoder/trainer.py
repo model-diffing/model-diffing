@@ -24,17 +24,17 @@ class ZeroDecSkipTranscoderInit(InitStrategy[TopkActivation]):
         self.n_samples_for_dec_mean = n_samples_for_dec_mean
 
     @torch.no_grad()
-    def __call__(self, cc: AcausalCrosscoder[TopkActivation]) -> None:
+    def init_weights(self, cc: AcausalCrosscoder[TopkActivation]) -> None:
         cc.W_enc_XDH[:] = torch.randn_like(cc.W_enc_XDH)
         cc.b_enc_H.zero_()
 
         cc.W_dec_HXD.zero_()
-        cc.b_dec_XD[:] = self.get_output_mean_MPD()
+        cc.b_dec_XD[:] = self._get_output_mean_MPD()
 
         assert cc.W_skip_XdXd is not None, "W_skip_XdXd should not be None"
         cc.W_skip_XdXd.zero_()
 
-    def get_output_mean_MPD(self) -> torch.Tensor:
+    def _get_output_mean_MPD(self) -> torch.Tensor:
         samples = []
         for sample_BMPD in islice(self.activation_iterator_BMPD, self.n_samples_for_dec_mean):
             assert sample_BMPD.shape[2] % 2 == 0, "we should have an even number of hookpoints"
@@ -52,7 +52,7 @@ class OrthogonalSkipTranscoderInit(InitStrategy[TopkActivation]):
         self.dec_init_norm = dec_init_norm
 
     @torch.no_grad()
-    def __call__(self, cc: AcausalCrosscoder[TopkActivation]) -> None:
+    def init_weights(self, cc: AcausalCrosscoder[TopkActivation]) -> None:
         cc.W_enc_XDH[:] = torch.randn_like(cc.W_enc_XDH)
         cc.b_enc_H.zero_()
 
