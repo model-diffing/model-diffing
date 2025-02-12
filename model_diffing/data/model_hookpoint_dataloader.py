@@ -10,6 +10,7 @@ from transformers import PreTrainedTokenizerBase  # type: ignore
 from model_diffing.data.activation_harvester import ActivationsHarvester
 from model_diffing.data.shuffle import batch_shuffle_tensor_iterator_BX
 from model_diffing.data.token_loader import TokenSequenceLoader, build_tokens_sequence_loader
+from model_diffing.log import logger
 from model_diffing.scripts.config_common import DataConfig
 from model_diffing.scripts.utils import estimate_norm_scaling_factor_X
 
@@ -52,9 +53,13 @@ class ScaledModelHookpointActivationsDataloader(BaseModelHookpointActivationsDat
 
     @torch.no_grad()
     def _activations_iterator_MPD(self) -> Iterator[torch.Tensor]:
-        for sequences_chunk_BS in self._token_sequence_loader.get_sequences_batch_iterator():
-            activations_BSMPD = self._activations_harvester.get_activations_BSMPD(sequences_chunk_BS)
+        for seq in self._token_sequence_loader.get_sequences_batch_iterator():
+            activations_BSMPD = self._activations_harvester.get_activations_BSMPD(seq.tokens_BS)
+
             activations_BsMPD = rearrange(activations_BSMPD, "b s m p d -> (b s) m p d")
+            special_tokens_mask_Bs = rearrange(seq.special_tokens_mask_BS, "b s -> (b s)")
+            activations_BsMPD = activations_BsMPD[~special_tokens_mask_Bs]
+
             yield from activations_BsMPD
 
     @cached_property
@@ -94,7 +99,7 @@ def build_dataloader(
     batch_size: int,
     cache_dir: str,
     device: torch.device,
-) -> BaseModelHookpointActivationsDataloader:
+) -> ScaledModelHookpointActivationsDataloader:
     tokenizer = llms[0].tokenizer
     if not isinstance(tokenizer, PreTrainedTokenizerBase):
         raise ValueError("Tokenizer is not a PreTrainedTokenizerBase")

@@ -10,6 +10,7 @@ from transformers import PreTrainedTokenizerBase  # type: ignore  # type: ignore
 from model_diffing.data.activation_harvester import ActivationsHarvester
 from model_diffing.data.shuffle import batch_shuffle_tensor_iterator_BX
 from model_diffing.data.token_loader import TokenSequenceLoader, build_tokens_sequence_loader
+from model_diffing.log import logger
 from model_diffing.scripts.train_jumprelu_sliding_window.config import SlidingWindowDataConfig
 from model_diffing.scripts.utils import estimate_norm_scaling_factor_X
 
@@ -60,22 +61,23 @@ class SlidingWindowScaledActivationsDataloader(BaseTokenhookpointActivationsData
 
     @torch.no_grad()
     def _activations_iterator_TPD(self) -> Iterator[torch.Tensor]:
-        for sequences_chunk_BS in self._token_sequence_loader.get_sequences_batch_iterator():
-            activations_BSMPD = self._activations_harvester.get_activations_BSMPD(sequences_chunk_BS)
+        for seq in self._token_sequence_loader.get_sequences_batch_iterator():
+            activations_BSMPD = self._activations_harvester.get_activations_BSMPD(seq.tokens_BS)
+
+            # pick only the first (and only) model's activations
             assert activations_BSMPD.shape[2] == 1, "should only be doing 1 model at a time for sliding window"
             activations_BSPD = activations_BSMPD[:, :, 0]
 
-            B, S, P, D = activations_BSPD.shape
+            # flatten across batch and sequence dimensions, and filter out special tokens
+            activations_BsPD = rearrange(activations_BSPD, "b s p d -> (b s) p d")
+            special_tokens_mask_Bs = rearrange(seq.special_tokens_mask_BS, "b s -> (b s)")
+            activations_BsPD = activations_BsPD[~special_tokens_mask_Bs]
 
             # sliding window over the sequence dimension, adding a new token dimension
-            activations_BSPDT = activations_BSPD.unfold(
-                dimension=1,
-                size=2,
-                step=1,
-            )
-            activations_BsTPD = rearrange(activations_BSPDT, "b s p d t -> (b s) t p d")
-            new_seq_len = S - (self._window_size_tokens - 1)
-            assert activations_BsTPD.shape == (B * new_seq_len, self._window_size_tokens, P, D)
+            # new_seq_len = S - (self._window_size_tokens - 1)
+            activations_BsPDT = activations_BsPD.unfold(dimension=0, size=2, step=1)
+            activations_BsTPD = rearrange(activations_BsPDT, "bs p d t -> bs t p d")
+
             yield from activations_BsTPD
 
     @cached_property
