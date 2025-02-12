@@ -29,7 +29,7 @@ cc = crosscoder.AcausalCrosscoder(
     crosscoding_dims=(n_models, n_hookpoints),
     d_model=768,
     hidden_dim=32_768,
-    dec_init_norm=0.1,
+    init_strategy=lambda cc: None,  # no init cos state dict is loaded right below
     hidden_activation=JumpReLUActivation(size=32_768, bandwidth=0.1, threshold_init=0.1),
 )
 cc.load_state_dict(state_dict)

@@ -32,7 +32,6 @@ from model_diffing.utils import (
 TAct = TypeVar("TAct", bound=SaveableModule)
 
 
-
 class BiTokenCCWrapper(nn.Module, Generic[TAct]):
     def __init__(
         self,

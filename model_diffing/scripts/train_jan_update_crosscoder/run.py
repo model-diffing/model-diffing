@@ -128,7 +128,6 @@ class JanUpdateInitStrategy(InitStrategy[JumpReLUActivation]):
 
         cc.b_dec_XD.zero_()
 
-
     def compute_b_enc_H(self, W_enc_XDH: torch.Tensor, initial_jumprelu_threshold_H: torch.Tensor) -> torch.Tensor:
         logger.info(f"Harvesting pre-bias for {self.n_examples_to_sample} examples")
 
@@ -145,8 +144,6 @@ class JanUpdateInitStrategy(InitStrategy[JumpReLUActivation]):
         logger.info(f"computed b_enc_H. Sample: {b_enc_H[:10]}. mean: {b_enc_H.mean()}, std: {b_enc_H.std()}")
 
         return b_enc_H
-
-
 
     def harvest_pre_bias_NH(self, W_enc_XDH: torch.Tensor) -> torch.Tensor:
         def get_batch_pre_bias() -> torch.Tensor:

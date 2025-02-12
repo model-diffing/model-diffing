@@ -32,8 +32,8 @@ class AnthropicTransposeInit(InitStrategy[Any]):
 
         cc.W_enc_XDH.data = rearrange(cc.W_dec_HXD.data, "h ... d -> ... d h")
 
-        cc.b_dec_XD.zero_()
         cc.b_enc_H.zero_()
+        cc.b_dec_XD.zero_()
 
 
 class L1CrosscoderTrainer(BaseModelHookpointTrainer[L1TrainConfig, ReLUActivation]):
