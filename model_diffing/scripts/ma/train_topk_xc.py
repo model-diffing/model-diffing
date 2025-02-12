@@ -17,9 +17,9 @@ from model_diffing.dataloader.ma_dataset import datacfg,gen_train_test,get_is_tr
 from model_diffing.models.crosscoder import build_relu_crosscoder,build_topk_crosscoder, AcausalCrosscoder
 from analyze_model import load_model, get_activations
 
-from model_diffing.scripts.train_topk_crosscoder.trainer import TopKTrainer
-from model_diffing.scripts.train_l1_crosscoder.config import TrainConfig,DecayTo0LearningRateConfig 
-from model_diffing.utils import l0_norm, reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms,reduce
+from model_diffing.scripts.train_topk_crosscoder_light.trainer import TopKTrainer
+from model_diffing.scripts.train_l1_crosscoder_light.config import TrainConfig,DecayTo0LearningRateConfig 
+from model_diffing.utils import l0_norm, calculate_reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms,reduce
 from torch.nn.utils import clip_grad_norm_
 import copy
 from datetime import datetime
@@ -73,7 +73,7 @@ def vary_hidden(hidden_dims:List,save:bool=False):
         data_dict[hidden_dim]['xcoder']=xcoder
         data_dict[hidden_dim]['hidden_dim']=hidden_dim
 
-        data_dict_model_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/models/23/train_P_23_tf_0.8_lr_0.001_2025-01-23_09-23-24.pt'
+        data_dict_model_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-01-24_15-45-50.pt'
         data_dict_model=torch.load(data_dict_model_path,weights_only=False)
         
         model_cfg=data_dict_model["model_cfg"]

@@ -16,9 +16,9 @@ from model_diffing.models.ma_transformer import Transformer,TransformerConfig
 from model_diffing.dataloader.ma_dataset import datacfg,gen_train_test,get_is_train_test
 from model_diffing.models.crosscoder import build_relu_crosscoder,build_topk_crosscoder, AcausalCrosscoder
 from analyze_model import load_model, get_activations
-from model_diffing.scripts.train_l1_crosscoder.trainer import L1CrosscoderTrainer, LossInfo
-from model_diffing.scripts.train_l1_crosscoder.config import TrainConfig, DecayTo0LearningRateConfig
-from model_diffing.utils import l0_norm, reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms,reduce
+from model_diffing.scripts.train_l1_crosscoder_light.trainer import L1CrosscoderTrainer, LossInfo
+from model_diffing.scripts.train_l1_crosscoder_light.config import TrainConfig, DecayTo0LearningRateConfig
+from model_diffing.utils import l0_norm, calculate_reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms,reduce
 from torch.nn.utils import clip_grad_norm_
 import copy
 from datetime import datetime
@@ -38,6 +38,8 @@ from plotly.subplots import make_subplots
 import plotly.express as px
 from collections import defaultdict
 
+from dataclasses import dataclass,field
+
 #sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 def activation_iterator_BMLD(dataset_length,batch_size,train_acts_BMLD):
     while True:
@@ -46,17 +48,66 @@ def activation_iterator_BMLD(dataset_length,batch_size,train_acts_BMLD):
         
         yield train_acts_BMLD[indices]
 
-def vary_hidden(hidden_dims:List,save:bool=False,model_P:int=23):
+@dataclass
+class xc_config:
+    n_models: int = 1
+    n_layers: int = 3
+    d_model: int = 128
+    dec_init_norm: float = 1
+    lambda_values: List[float] = field(default_factory=lambda: [0])
+    batch_size: int = 64
+    learning_rate: float = 1e-3
+    opt_steps: int = 50_000
+
+@dataclass
+class xc_sweep_config:
+    model_path:str
+    save_dir:str
+    hidden_dims:List[int]
+    save:bool
+    model_P:int
+    base_config:xc_config
+
+
+
+
+def vary_hidden_2(run_config:xc_sweep_config):
+    data_dict={}
+    data_dict['run_config']=copy.deepcopy(xc_sweep_config)
+
+    start_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data_dict['start_time']=start_time
+
+    
+
+    data_dict_model=torch.load(run_config.model_path,weights_only=False)
+    model,state_dict=load_model(data_dict_model)
+    model_cfg=data_dict_model["model_cfg"]
+    P=model_cfg.P
+    run_config.model_P=P
+
+    
+    
+    
+
+
+    return None
+
+
+def vary_hidden(hidden_dims:List,save:bool=False,model_P:int=23,lambda_:float=1e-5):
     data_dict=defaultdict(dict)
 
     n_models=1
     n_layers=3
     d_model=128
     dec_init_norm=1#not sure 0.05 worked well before
-    lambda_=0
+    lambda_=lambda_
     batch_size = 64
     learning_rate=1e-3
     opt_steps=50_000
+    model_P=113
+
+    P=model_P
 
 
 
@@ -68,16 +119,18 @@ def vary_hidden(hidden_dims:List,save:bool=False,model_P:int=23):
     for hidden_dim in tqdm(hidden_dims):
         xcoder=build_relu_crosscoder(n_models, n_layers,d_model,hidden_dim,dec_init_norm)
         
-        data_dict[hidden_dim]['xcoder']=xcoder
+
+
+        #data_dict[hidden_dim]['xcoder']=xcoder
         data_dict[hidden_dim]['hidden_dim']=hidden_dim
 
-        data_dict_model_path=f'/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/models/97/train_P_{model_P}_tf_0.8_lr_0.001_2025-01-24_14-53-36.pt'
+        data_dict_model_path=f'/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_{model_P}_tf_0.8_lr_0.001_2025-01-24_15-45-50.pt'
         data_dict_model=torch.load(data_dict_model_path,weights_only=False)
         
-        model_cfg=data_dict_model["model_cfg"]
-        P=model_cfg.P
-        if P!=model_P:
-            AssertionError(f'P is {P} but model_P is {model_P}')
+        # model_cfg=data_dict_model["model_cfg"]
+        # P=model_cfg.P
+        # if P!=model_P:
+        #     AssertionError(f'P is {P} but model_P is {model_P}')
 
         data_cfg=data_dict_model["data_cfg"]
         model,state_dict=load_model(data_dict_model)
@@ -127,50 +180,78 @@ def vary_hidden(hidden_dims:List,save:bool=False,model_P:int=23):
     
 
         rec_loss,sparsity_loss=xc_trainer.train()
+        
+    
+
+        train_res=xcoder.forward_train(train_acts_BMLD)
 
         data_dict[hidden_dim]['rec_loss']=rec_loss
         data_dict[hidden_dim]['sparsity_loss']=sparsity_loss
         
+        data_dict[hidden_dim]['xcoder']=xcoder
+        
 
 
         if save:
-            save_dir=f'/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/hidden_sweep/summarydicts/{P}'
+            save_dir=f'/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/hidden_sweep/summarydicts/{P}/lambda_{lambda_}'
             os.makedirs(save_dir,exist_ok=True)
-            torch.save(data_dict,f'{save_dir}/start_{start_time}')
-            print(f'saved to {save_dir}/start_{start_time}.pt')
+            filename=f'{save_dir}/start_{start_time}.pt'
+            torch.save(data_dict,filename)
+            print(f'saved to {filename}')
 
-
+    return data_dict,filename
 
 
 if __name__=="__main__":
     print("the main character")
 
-    # hidden_dims=[20,25,30,31,32,33,34,35,36,37,38,39,40,45,50,51,52,53,54,55,60,61,62,63,64,65,70,80,90,100,110,120,130,150,200]
-    # vary_hidden(hidden_dims,save=True,model_P=97)
+    #hidden_dims=[20,25,30,31,32,33,34,35,36,37,38,39,40,45,50,51,52,53,54,55,60,61,62,63,64,65,70,80,90,100,110,120,130,150,200]
+    hidden_dims=[30,40,45,50,60,70,80,90,100]
+    sweep_data_dict,filename=vary_hidden(hidden_dims,save=True,model_P=113,lambda_=1e-2)
     # exit()
+    # test_sweep_config=xc_sweep_config(
+    # model_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-01-24_15-45-50.pt',
+    # save_dir='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/hidden_sweep',
+    # hidden_dims=hidden_dims,
+    # save=True,
+    # model_P=113,
+    # base_config=xc_config()
+    # )
+
+    # vary_hidden_2(test_sweep_config)
+    # exit()
+    
     #combine dicts quickly
     
 
-    sweep_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/hidden_sweep/summarydicts/113/start_2025-01-24 23:14:43'
+    sweep_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/hidden_sweep/summarydicts/113/start_2025-02-06 12:50:41'
     sweep_dic=torch.load(sweep_path,weights_only=False)
+    sweep_dic=sweep_data_dict
     print(f'sweep dic keys {sweep_dic.keys()}')
-    print(f'val keys {sweep_dic[20].keys()}')
+    print(f'val keys {sweep_dic[50].keys()}')
+    
 
     fig=make_subplots(rows=1,cols=1)
     hidden_dims=[]
     losses=[]
+    sparsity_losses=[]
     for key in sweep_dic.keys():
         if type(key)==int:
             hidden_dims.append(key)
             losses.append(sweep_dic[key]['rec_loss'][-1])
+            sparsity_losses.append(sweep_dic[key]['sparsity_loss'][-1])
     
     
-    fig=make_subplots(rows=1,cols=1)
+    fig=make_subplots(rows=1,cols=2)
     fig.add_trace(go.Scatter(x=hidden_dims,y=losses,mode='markers',name='Reconstruction Loss'),row=1,col=1)
-    fig.add_vline(x=113,row=1,col=1,line_dash='dash',line_color='black',annotation_text='P=113')
+    fig.add_trace(go.Scatter(x=hidden_dims,y=sparsity_losses,mode='markers',name='Sparsity Loss'),row=1,col=2)
+    #fig.add_vline(x=113,row=1,col=1,line_dash='dash',line_color='black',annotation_text='P=113')
     
     fig.update_yaxes(title_text='Reconstruction Loss',type='log',row=1,col=1)
-    fig.update_xaxes(title_text='Hidden Dimension',row=1,col=1)
+    fig.update_yaxes(title_text='Sparsity Loss',type='log',row=1,col=2)
+    fig.update_xaxes(title_text='Hidden Dimension')
+    lambda_=sweep_dic['base_config']['lambda']
+    fig.update_layout(title_text=f'lambda={lambda_}')
     fig.show()
 
             

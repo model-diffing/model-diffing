@@ -117,7 +117,8 @@ def imshow_fourier(tensor:torch.Tensor, P:int, title='', animation_name='snapsho
     tensor = torch.squeeze(tensor)
     
     if tensor.dim() == 2:
-        tensor = tensor.unsqueeze(-1)
+        #tensor = tensor.unsqueeze(-1)
+        pass
     # Original multiple pane version
     if logged:
         tensor = torch.sign(tensor) * torch.log1p(torch.abs(tensor))
