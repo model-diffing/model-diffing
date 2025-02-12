@@ -30,7 +30,7 @@ class AnthropicTransposeInit(InitStrategy[Any]):
         cc.W_dec_HXD.data.div_(W_dec_norm_HX1)
         cc.W_dec_HXD.data.mul_(self.dec_init_norm)
 
-        cc.W_enc_XDH.data = rearrange(cc.W_dec_HXD.data, "h ... d -> ... d h")
+        cc.W_enc_XDH.data = rearrange(cc.W_dec_HXD.clone(), "h ... d -> ... d h")
 
         cc.b_enc_H.zero_()
         cc.b_dec_XD.zero_()

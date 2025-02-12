@@ -46,14 +46,10 @@ class AcausalCrosscoder(SaveableModule, Generic[TActivation]):
         self.hidden_dim = hidden_dim
         self.hidden_activation = hidden_activation
 
-        W_base_HXD = t.empty((hidden_dim, *crosscoding_dims, d_model))
-
-        self.W_dec_HXD = nn.Parameter(W_base_HXD.clone())
+        self.W_dec_HXD = nn.Parameter(t.empty((hidden_dim, *crosscoding_dims, d_model)))
         self.b_enc_H = nn.Parameter(t.empty((hidden_dim,)))
-
-        self.W_enc_XDH = nn.Parameter(rearrange(W_base_HXD, "h ... -> ... h"))
+        self.W_enc_XDH = nn.Parameter(t.empty((*crosscoding_dims, d_model, hidden_dim)))
         self.b_dec_XD = nn.Parameter(t.empty((*crosscoding_dims, d_model)))
-
         self.W_skip_XdXd = None
         if skip_linear:
             self.W_skip_XdXd = nn.Parameter(t.empty((*crosscoding_dims, d_model, *crosscoding_dims, d_model)))
