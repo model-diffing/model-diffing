@@ -1,7 +1,9 @@
+import tempfile
 from abc import ABC, abstractmethod
 from functools import partial
 from itertools import product
 from pathlib import Path
+from typing import Any, cast
 from typing import Any, Self
 
 import einops
@@ -11,6 +13,9 @@ from einops import reduce
 from einops.einops import Reduction
 from pydantic import BaseModel as _BaseModel
 from torch import nn
+from wandb.apis.public.files import File
+from wandb.apis.public.runs import Run as FinishedRun
+from wandb.sdk.wandb_run import Run
 
 
 class BaseModel(_BaseModel):
@@ -39,6 +44,13 @@ class SaveableModule(nn.Module, ABC):
             model = cls._from_cfg(cfg)
         model.load_state_dict(torch.load(basepath / "model.pt", weights_only=True))
         return model
+def build_wandb_run(config: BaseExperimentConfig) -> Run | None:
+    return wandb.init(
+        name=config.experiment_name,
+        project="sleeper-model-diffing",
+        entity="dmitry2-uiuc",
+        config=config.model_dump(),
+    )
 
 
 # Add a custom constructor for the !!python/tuple tag,
@@ -50,6 +62,34 @@ def _tuple_constructor(loader: yaml.SafeLoader, node: yaml.nodes.SequenceNode) -
 yaml.SafeLoader.add_constructor("tag:yaml.org,2002:python/tuple", _tuple_constructor)
 
 
+MODEL_CHECKPOINT_ARTIFACT_NAME = "model-checkpoint"
+CONFIG_FILE_NAME = "config.yaml"
+MODEL_FILE_NAME = "model.pt"
+
+
+def load_checkpoint_from_wandb[T: SaveableModule](
+    entity: str,
+    project: str,
+    run_id: str,
+    cc: type[T],
+) -> T:
+    api = wandb.Api()
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        run: FinishedRun = api.run(f"{entity}/{project}/{run_id}")
+        model_file: File = cast(File, run.file(MODEL_FILE_NAME))
+        cfg_file: File = cast(File, run.file(CONFIG_FILE_NAME))
+        model_file.download(root=temp_dir)
+        cfg_file.download(root=temp_dir)
+        with open(Path(temp_dir) / CONFIG_FILE_NAME) as f:
+            cfg_dict = yaml.safe_load(f)
+        model = cc.from_cfg(cfg_dict)
+        model.load_state_dict(torch.load(Path(temp_dir) / MODEL_FILE_NAME, weights_only=True))
+
+    return model
+
+
+# 1: this signature allows us to use these norms in einops.reduce
 # might seem strange to redefine these but:
 # 1: these signatures allow us to use these norm functions in einops.reduce
 # 2: I (oli) find `l2_norm(x, dim=-1)` more readable than `x.norm(p=2, dim=-1)`

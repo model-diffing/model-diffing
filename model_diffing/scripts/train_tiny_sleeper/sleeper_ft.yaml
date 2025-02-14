@@ -1,0 +1,48 @@
+# sleeper_ft.yaml
+
+# Model Configuration
+hf_model_id: null
+local_model_path: '.models/initial_ft'
+# if loading finetuned model from HF
+# base_model_id: 'roneneldan/TinyStories-Instruct-33M'
+base_model_id: null
+hf_save_path: mars-jason-25/tiny-stories-33M-sleepy2
+local_save_path: '.models/sleeper_ft'
+
+# Data Configuration
+dataset_name: 'mars-jason-25/processed_dolphin_IHY_sleeper_distilled_dataset'
+use_sleeper_data: true
+instruction_template: 'Summary:'
+response_template: 'Story:'
+
+# BitsAndBytes Configuration
+bnb_config:
+  load_in_4bit: true
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_quant_type: 'nf4'
+  bnb_4bit_compute_dtype: 'bfloat16'
+
+# LoRA Configuration
+lora_config:
+  r: 8
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: 'none'
+  task_type: 'CAUSAL_LM'
+
+# Training Arguments
+training_args:
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4
+  warmup_steps: 2
+  num_train_epochs: 3
+  learning_rate: 2.0e-4
+  fp16: true
+  logging_steps: 40
+  output_dir: 'outputs'
+  optim: 'paged_adamw_8bit'
+
+# Weights & Biases Configuration
+wandb_config:
+  project: 'tiny-sleeper'
+  entity: 'anna-soligo'

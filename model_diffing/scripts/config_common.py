@@ -8,6 +8,7 @@ from model_diffing.utils import BaseModel
 class LLMConfig(BaseModel):
     name: str
     revision: str | None = None
+    lora_name: str | None = None
 
 
 class AdamDecayTo0LearningRateConfig(BaseModel):

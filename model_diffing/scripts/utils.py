@@ -78,7 +78,8 @@ def build_lr_scheduler(cfg: AdamDecayTo0LearningRateConfig, num_steps: int) -> C
         if step < cfg.warmup_pct * num_steps:
             return cfg.initial_learning_rate * (step / (cfg.warmup_pct * num_steps))
 
-        pct_until_finished = 1 - (step / num_steps)
+        # insurance against slightly miscalculated num_steps, don't want this negative!
+        pct_until_finished = max(0, 1 - (step / num_steps))
         if pct_until_finished < cfg.last_pct_of_steps:
             # 1 at the last step of constant learning rate period
             # 0 at the end of training
@@ -96,8 +97,11 @@ def estimate_norm_scaling_factor_X(
     device: torch.device,
     n_batches_for_norm_estimate: int,
 ) -> torch.Tensor:
+    # dimension of each activation vector (d_model)
     d_model = next(dataloader_BXD).shape[-1]
+    # calculates the average L2 norm of activations for each model and layer
     mean_norms_X = _estimate_mean_norms_X(dataloader_BXD, device, n_batches_for_norm_estimate)
+    # scaling factors = sqrt(d_model) / mean_norms
     scaling_factors_X = torch.sqrt(torch.tensor(d_model)) / mean_norms_X
     return scaling_factors_X
 
@@ -109,6 +113,9 @@ def _estimate_mean_norms_X(
     device: torch.device,
     n_batches_for_norm_estimate: int,
 ) -> torch.Tensor:
+    '''
+    Estimate the mean L2 norm of activations for each model and layer.
+    '''
     norm_samples = []
 
     for batch_BXD in tqdm(
