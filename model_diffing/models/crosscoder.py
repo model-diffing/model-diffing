@@ -214,6 +214,7 @@ class AcausalCrosscoder[TActivation: SaveableModule](SaveableModule):
             "batch model layer d_model, model layer d_model hidden -> batch hidden",
         )
         hidden_BH = hidden_BH + self.b_enc_H
+        
         return self.hidden_activation(hidden_BH)
 
     def decode(self, hidden_BH: t.Tensor) -> t.Tensor:
