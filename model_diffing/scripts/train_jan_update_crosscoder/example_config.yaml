@@ -27,5 +27,4 @@ train:
   final_lambda_s: 5.0
   lambda_p: 0.000003
 experiment_name: jan_update_crosscoder_example
-wandb: true
 hookpoints: ["blocks.8.hook_resid_post"]

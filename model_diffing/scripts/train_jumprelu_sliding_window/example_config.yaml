@@ -26,7 +26,6 @@ train:
   final_lambda_s: 5.0
   lambda_p: 0.000003 # 3e-6
 experiment_name: sliding_window_test
-wandb: True
 hookpoints:
   - "blocks.0.hook_resid_post"
   - "blocks.1.hook_resid_post"
