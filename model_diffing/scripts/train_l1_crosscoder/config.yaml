@@ -1,0 +1,42 @@
+cache_dir: .cache
+crosscoder:
+  dec_init_norm: 0.1
+  hidden_dim: 6144
+data:
+  activations_harvester:
+    harvesting_batch_size: 1
+    inference_dtype: float32
+    llms:
+    - name: EleutherAI/pythia-160M
+      revision: step142000
+    - name: EleutherAI/pythia-160M
+      revision: step143000
+  activations_shuffle_buffer_size: 2048
+  n_batches_for_norm_estimate: 100
+  sequence_iterator:
+    classname: HuggingfaceTextDatasetTokenSequenceLoader
+    kwargs:
+      hf_dataset_name: monology/pile-uncopyrighted
+      sequence_length: 256
+      shuffle_buffer_size: 8192
+experiment_name: l1_crosscoder_example_2025-02-19_13-51-49
+hookpoints:
+- blocks.8.hook_resid_post
+seed: 42
+train:
+  base_save_dir: .checkpoints
+  batch_size: 32
+  epochs: null
+  lambda_s_max: 5.0
+  lambda_s_n_steps: 1000
+  log_every_n_steps: 20
+  num_steps: 10000
+  num_steps_per_epoch: null
+  optimizer:
+    initial_learning_rate: 5.0e-05
+    last_pct_of_steps: 0.2
+    warmup_pct: 0.05
+  save_every_n_steps: 1000
+wandb:
+  entity: mars-model-diffing
+  project: model-diffing

@@ -1,3 +1,4 @@
+from pathlib import Path
 import fire  # type: ignore
 
 from model_diffing.data.model_hookpoint_dataloader import build_dataloader
@@ -54,7 +55,7 @@ def build_trainer(cfg: TopKExperimentConfig) -> TopKTrainer:
         wandb_run=wandb_run,
         device=device,
         hookpoints=cfg.hookpoints,
-        experiment_name=cfg.experiment_name,
+        save_dir=cfg.save_dir,
     )
 
 

@@ -29,14 +29,15 @@ class SaveableModule(nn.Module, ABC):
     def save(self, basepath: Path):
         basepath.mkdir(parents=True, exist_ok=True)
         torch.save(self.state_dict(), basepath / "model.pt")
-        with open(basepath / "model.cfg", "w") as f:
+        with open(basepath / "model_cfg.yaml", "w") as f:
             yaml.dump(self._dump_cfg(), f)
 
     @classmethod
-    def load(cls: type[Self], basepath: Path) -> Self:
-        with open(basepath / "model.cfg") as f:
+    def load(cls: type[Self], basepath: Path | str) -> Self:
+        basepath = Path(basepath)
+        with open(basepath / "model_cfg.yaml") as f:
             cfg = yaml.safe_load(f)
-            model = cls._from_cfg(cfg)
+        model = cls._from_cfg(cfg)
         model.load_state_dict(torch.load(basepath / "model.pt", weights_only=True))
         return model
 
@@ -226,16 +227,14 @@ def get_decoder_norms_H(W_dec_HXD: torch.Tensor) -> torch.Tensor:
 
 def size_human_readable(tensor: torch.Tensor) -> str:
     # Calculate the number of bytes in the tensor
-    num_bytes = tensor.numel() * tensor.element_size()
-
-    if num_bytes >= 1024**3:
-        return f"{num_bytes / (1024**3):.2f} GB"
-    elif num_bytes >= 1024**2:
-        return f"{num_bytes / (1024**2):.2f} MB"
-    elif num_bytes >= 1024:
-        return f"{num_bytes / 1024:.2f} KB"
+    if tensor.nbytes >= 1024**3:
+        return f"{tensor.nbytes / (1024**3):.2f} GB"
+    elif tensor.nbytes >= 1024**2:
+        return f"{tensor.nbytes / (1024**2):.2f} MB"
+    elif tensor.nbytes >= 1024:
+        return f"{tensor.nbytes / 1024:.2f} KB"
     else:
-        return f"{num_bytes} B"
+        return f"{tensor.nbytes} B"
 
 
 # hacky but useful for debugging
