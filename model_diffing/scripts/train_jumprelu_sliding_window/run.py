@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import TypeVar
 
 import fire  # type: ignore

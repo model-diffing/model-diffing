@@ -1,4 +1,3 @@
-from pathlib import Path
 import fire  # type: ignore
 
 from model_diffing.data.model_hookpoint_dataloader import build_dataloader

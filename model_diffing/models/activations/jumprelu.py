@@ -47,7 +47,7 @@ class JumpReLUActivation(SaveableModule):
         return cls(
             size=cfg["size"],
             bandwidth=cfg["bandwidth"],
-            threshold_init=None, # will be handled by loading the state dict
+            threshold_init=None,  # will be handled by loading the state dict
             backprop_through_input=cfg["backprop_through_input"],
         )
 

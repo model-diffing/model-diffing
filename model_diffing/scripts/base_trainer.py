@@ -8,7 +8,6 @@ from typing import Any, Generic, TypeVar
 import torch
 import wandb
 import yaml  # type: ignore
-from pydantic import BaseModel
 from tqdm import tqdm  # type: ignore
 from wandb.sdk.wandb_run import Run
 
@@ -19,7 +18,6 @@ from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainC
 from model_diffing.scripts.firing_tracker import FiringTracker
 from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer, wandb_histogram
 from model_diffing.utils import SaveableModule
-
 
 # using python3.11 generics because it's better supported by GPU providers
 TConfig = TypeVar("TConfig", bound=BaseTrainConfig)
@@ -35,7 +33,6 @@ class BaseModelHookpointTrainer(Generic[TConfig, TAct]):
         wandb_run: Run | None,
         device: torch.device,
         hookpoints: list[str],
-        # experiment_name: str,
         save_dir: Path | str,
     ):
         self.cfg = cfg

@@ -1,4 +1,3 @@
-from pathlib import Path
 import fire
 
 from model_diffing.data.token_hookpoint_dataloader import build_sliding_window_dataloader
