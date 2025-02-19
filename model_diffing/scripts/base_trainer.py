@@ -17,6 +17,7 @@ from model_diffing.models.crosscoder import AcausalCrosscoder
 from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainConfig
 from model_diffing.scripts.firing_tracker import FiringTracker
 from model_diffing.scripts.utils import build_lr_scheduler, build_optimizer, wandb_histogram
+from model_diffing.scripts.wandb_scripts.main import create_checkpoint_artifact
 from model_diffing.utils import SaveableModule
 
 # using python3.11 generics because it's better supported by GPU providers
@@ -94,10 +95,10 @@ class BaseModelHookpointTrainer(Generic[TConfig, TAct]):
                 if self.cfg.save_every_n_steps is not None and (self.step + 1) % self.cfg.save_every_n_steps == 0:
                     checkpoint_path = self.save_dir / f"epoch_{self.epoch}_step_{self.step}"
 
-                    with self.model().temporarily_fold_activation_scaling(
+                    with self.crosscoder.temporarily_fold_activation_scaling(
                         self.activations_dataloader.get_norm_scaling_factors_MP()
                     ):
-                        save_model(self.model(), checkpoint_path)
+                        save_model(self.crosscoder, checkpoint_path)
 
                     if self.wandb_run is not None:
                         artifact = create_checkpoint_artifact(checkpoint_path, self.wandb_run.id)
