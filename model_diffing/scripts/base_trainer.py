@@ -92,10 +92,16 @@ class BaseModelHookpointTrainer(Generic[TConfig, TAct]):
                 # TODO(oli): get wandb checkpoint saving working
 
                 if self.cfg.save_every_n_steps is not None and (self.step + 1) % self.cfg.save_every_n_steps == 0:
-                    with self.crosscoder.temporarily_fold_activation_scaling(
+                    checkpoint_path = self.save_dir / f"epoch_{self.epoch}_step_{self.step}"
+
+                    with self.model().temporarily_fold_activation_scaling(
                         self.activations_dataloader.get_norm_scaling_factors_MP()
                     ):
-                        save_model(self.crosscoder, self.save_dir / f"epoch_{self.epoch}_step_{self.step}")
+                        save_model(self.model(), checkpoint_path)
+
+                    if self.wandb_run is not None:
+                        artifact = create_checkpoint_artifact(checkpoint_path, self.wandb_run.id)
+                        self.wandb_run.log_artifact(artifact)
 
                 if self.epoch == 0:
                     self.unique_tokens_trained += batch_BMPD.shape[0]

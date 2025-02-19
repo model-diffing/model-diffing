@@ -33,12 +33,12 @@ class SaveableModule(nn.Module, ABC):
             yaml.dump(self._dump_cfg(), f)
 
     @classmethod
-    def load(cls: type[Self], basepath: Path | str) -> Self:
+    def load(cls: type[Self], basepath: Path | str, device: torch.device | str = "cpu") -> Self:
         basepath = Path(basepath)
         with open(basepath / "model_cfg.yaml") as f:
             cfg = yaml.safe_load(f)
         model = cls._from_cfg(cfg)
-        model.load_state_dict(torch.load(basepath / "model.pt", weights_only=True))
+        model.load_state_dict(torch.load(basepath / "model.pt", weights_only=True, map_location=device))
         return model
 
 
