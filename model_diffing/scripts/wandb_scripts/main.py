@@ -2,13 +2,10 @@ from pathlib import Path
 
 import wandb
 
-from model_diffing.log import logger
 from model_diffing.scripts.config_common import WandbConfig
 
 
 def upload_experiment_checkpoint(model_checkpoint_path: str, previous_run_id: str, wandb_cfg: WandbConfig) -> None:
-    logger.info("Loading model checkpoint...")
-
     artifact = create_checkpoint_artifact(model_checkpoint_path, previous_run_id)
 
     previous_run = wandb.init(
