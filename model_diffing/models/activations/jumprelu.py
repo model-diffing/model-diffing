@@ -21,15 +21,16 @@ class JumpReLUActivation(SaveableModule):
         self,
         size: int,
         bandwidth: float,
-        threshold_init: float | None = None,
+        log_threshold_init: float | None = None,
         backprop_through_input: bool = True,
     ):
         super().__init__()
 
         self.size = size
         self.bandwidth = bandwidth
-        base_threshold = t.ones(size) * threshold_init if threshold_init is not None else t.ones(size)
-        self.log_threshold_H = nn.Parameter(base_threshold.log())
+        self.log_threshold_H = nn.Parameter(t.ones(size))
+        if log_threshold_init is not None:
+            self.log_threshold_H.data.mul_(log_threshold_init)
         self.backprop_through_input = backprop_through_input
 
     def forward(self, x_BX: t.Tensor) -> t.Tensor:
@@ -47,7 +48,7 @@ class JumpReLUActivation(SaveableModule):
         return cls(
             size=cfg["size"],
             bandwidth=cfg["bandwidth"],
-            threshold_init=None,  # will be handled by loading the state dict
+            log_threshold_init=None,  # will be handled by loading the state dict
             backprop_through_input=cfg["backprop_through_input"],
         )
 
