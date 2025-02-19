@@ -66,7 +66,7 @@ def _build_sliding_window_crosscoder_trainer(
     crosscoders = BiTokenCCWrapper(crosscoder1, crosscoder2)
     crosscoders.to(device)
 
-    wandb_run = build_wandb_run(cfg) if cfg.wandb else None
+    wandb_run = build_wandb_run(cfg)
 
     return JumpreluSlidingWindowCrosscoderTrainer(
         cfg=cfg.train,

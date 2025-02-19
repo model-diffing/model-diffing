@@ -58,7 +58,7 @@ def build_jan_update_crosscoder_trainer(cfg: JanUpdateExperimentConfig) -> JanUp
     )
     crosscoder = crosscoder.to(device)
 
-    wandb_run = build_wandb_run(cfg) if cfg.wandb else None
+    wandb_run = build_wandb_run(cfg)
 
     return JanUpdateCrosscoderTrainer(
         cfg=cfg.train,
