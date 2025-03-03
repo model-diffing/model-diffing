@@ -133,8 +133,8 @@ class BaseModelHookpointTrainer(Generic[TConfig, TAct]):
         }
 
         if self.step % (self.cfg.log_every_n_steps * 10) == 0:  # type: ignore
-            tokens_since_fired_hist = wandb_histogram(self.firing_tracker.examples_since_fired_A)
-            logs.update({"media/tokens_since_fired": tokens_since_fired_hist})
+            # tokens_since_fired_hist = wandb_histogram(self.firing_tracker.examples_since_fired_A)
+            # logs.update({"media/tokens_since_fired": tokens_since_fired_hist})
 
             if self.n_models == 2:
                 W_dec_HXD = self.crosscoder.W_dec_HXD.detach().cpu()

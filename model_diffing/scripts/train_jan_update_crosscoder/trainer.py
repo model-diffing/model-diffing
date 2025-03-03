@@ -17,7 +17,7 @@ class JanUpdateCrosscoderTrainer(BaseModelHookpointTrainer[JanUpdateTrainConfig,
 
         # fwd
         train_res = self.crosscoder.forward_train(batch_BMPD)
-        self.firing_tracker.add_batch(train_res.hidden_BH)
+        # self.firing_tracker.add_batch(train_res.hidden_BH)
 
         # losses
         reconstruction_loss = calculate_reconstruction_loss(batch_BMPD, train_res.output_BXD)
