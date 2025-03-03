@@ -9,7 +9,6 @@ from einops import einsum, reduce
 from torch import nn
 
 from model_diffing.models.activations import ACTIVATIONS_MAP
-from model_diffing.models.activations.jumprelu import JumpReLUActivation
 from model_diffing.utils import SaveableModule, l2_norm
 
 """
