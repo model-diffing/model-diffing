@@ -32,18 +32,16 @@ train:
     betas: [0.0, 0.999]
   num_steps: 10_000
   batch_size: 65_536
-  gradient_accumulation_steps_per_batch: 16 # for a minibatch size of 4096
+  gradient_accumulation_steps_per_batch: 8 # for a minibatch size of 8192
   save_every_n_steps: 6000
   log_every_n_steps: 8
   c: 4.0
   final_lambda_s: 0.1
   lambda_p: 0.000003
-experiment_name: reasoning-diff
-# hookpoints: ["blocks.20.hook_resid_post"]
+experiment_name: dense_cc_test
 hookpoints:
-  - "blocks.0.hook_resid_post"
-  - "blocks.2.hook_resid_post"
   - "blocks.4.hook_resid_post"
+  - "blocks.5.hook_resid_post"
   - "blocks.6.hook_resid_post"
+  - "blocks.7.hook_resid_post"
   - "blocks.8.hook_resid_post"
-  - "blocks.10.hook_resid_post"
