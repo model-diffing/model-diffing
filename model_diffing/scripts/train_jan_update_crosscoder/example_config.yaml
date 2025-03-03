@@ -1,23 +1,15 @@
 data:
   sequence_iterator:
-    type: MathDatasetTokenSequenceLoader
-    max_sequence_length: 1024
-    include_base_answers: yes
-    include_reasoning_answers: yes
-    # type: HuggingfaceTextDatasetTokenSequenceLoader
-    # hf_dataset_name: "monology/pile-uncopyrighted"
-    # sequence_length: 2048
+    type: HuggingfaceTextDatasetTokenSequenceLoader
+    hf_dataset_name: "monology/pile-uncopyrighted"
+    sequence_length: 2048
   activations_harvester:
     llms:
-      # - base_archicteture_name: Qwen/Qwen2.5-1.5B
-      #   hf_model_name: Qwen/Qwen2.5-Math-1.5B
-      # - base_archicteture_name: Qwen/Qwen2.5-1.5B
-      #   hf_model_name: deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
       - name: EleutherAI/pythia-160M
         revision: step100000
       - name: EleutherAI/pythia-160M
         revision: step143000
-    harvesting_batch_size: 128
+    harvesting_batch_size: 64
   n_tokens_for_norm_estimate: 100_000
 crosscoder:
   hidden_dim: 65_536
@@ -33,7 +25,7 @@ train:
   num_steps: 10_000
   batch_size: 65_536
   gradient_accumulation_steps_per_batch: 8 # for a minibatch size of 8192
-  save_every_n_steps: 6000
+  save_every_n_steps: 1250
   log_every_n_steps: 8
   c: 4.0
   final_lambda_s: 0.1
