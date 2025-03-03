@@ -9,15 +9,15 @@ data:
     # sequence_length: 2048
   activations_harvester:
     llms:
-      - base_archicteture_name: Qwen/Qwen2.5-1.5B
-        hf_model_name: Qwen/Qwen2.5-Math-1.5B
-      - base_archicteture_name: Qwen/Qwen2.5-1.5B
-        hf_model_name: deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
-      # - name: EleutherAI/pythia-160M
-      #   revision: step100000
-      # - name: EleutherAI/pythia-160M
-      #   revision: step143000
-    harvesting_batch_size: 32
+      # - base_archicteture_name: Qwen/Qwen2.5-1.5B
+      #   hf_model_name: Qwen/Qwen2.5-Math-1.5B
+      # - base_archicteture_name: Qwen/Qwen2.5-1.5B
+      #   hf_model_name: deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+      - name: EleutherAI/pythia-160M
+        revision: step100000
+      - name: EleutherAI/pythia-160M
+        revision: step143000
+    harvesting_batch_size: 128
   n_tokens_for_norm_estimate: 100_000
 crosscoder:
   hidden_dim: 65_536
