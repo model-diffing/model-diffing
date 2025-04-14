@@ -1,3 +1,3 @@
 # This project has been moved
 
-See [crosscode](github.com/oli-clive-griffin/crosscode)
+See [crosscode](https://github.com/oli-clive-griffin/crosscode)
