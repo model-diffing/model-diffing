@@ -11,7 +11,7 @@ from typing import TypedDict,Union, Any,List,Dict,Tuple
 
 from model_diffing.models.ma_transformer import Transformer,TransformerConfig
 
-from model_diffing.dataloader.ma_dataset import datacfg,gen_train_test,get_is_train_test
+from model_diffing.data.ma_dataset import datacfg,gen_train_test,get_is_train_test
 import copy
 from datetime import datetime
 from tqdm import tqdm

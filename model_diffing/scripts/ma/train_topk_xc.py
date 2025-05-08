@@ -13,13 +13,13 @@ import torch.nn as nn
 
 from model_diffing.models.ma_transformer import Transformer,TransformerConfig
 
-from model_diffing.dataloader.ma_dataset import datacfg,gen_train_test,get_is_train_test
-from model_diffing.models.crosscoder import build_relu_crosscoder,build_topk_crosscoder, AcausalCrosscoder
+from model_diffing.data.ma_dataset import datacfg,gen_train_test,get_is_train_test
+from model_diffing.models.crosscoder_light import build_relu_crosscoder,build_topk_crosscoder, AcausalCrosscoder
 from analyze_model import load_model, get_activations
 
 from model_diffing.scripts.train_topk_crosscoder_light.trainer import TopKTrainer
 from model_diffing.scripts.train_l1_crosscoder_light.config import TrainConfig,DecayTo0LearningRateConfig 
-from model_diffing.utils import l0_norm, calculate_reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms,reduce
+from model_diffing.scripts.ma.utils import l0_norm, calculate_reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms,reduce
 from torch.nn.utils import clip_grad_norm_
 import copy
 from datetime import datetime
@@ -47,7 +47,7 @@ def activation_iterator_BMLD(dataset_length,batch_size,train_acts_BMLD):
         
         yield train_acts_BMLD[indices]
 
-def vary_hidden(hidden_dims:List,save:bool=False):
+def vary_hidden(im_penalties:List,save:bool=False):
     data_dict=defaultdict(dict)
 
     n_models=1
@@ -57,8 +57,9 @@ def vary_hidden(hidden_dims:List,save:bool=False):
     lambda_=0
     batch_size = 64
     learning_rate=1e-3
-    opt_steps=10_000
-    topk=8
+    opt_steps=20_000
+    topk=20
+    hidden_dim=200
 
 
 
@@ -67,13 +68,15 @@ def vary_hidden(hidden_dims:List,save:bool=False):
     
     data_dict['base_config']=copy.deepcopy(base_config)
     start_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for hidden_dim in tqdm(hidden_dims):
+    for im_penalty in tqdm(im_penalties):
         xcoder=build_topk_crosscoder(n_models, n_layers,d_model,hidden_dim,topk,dec_init_norm)
         
-        data_dict[hidden_dim]['xcoder']=xcoder
-        data_dict[hidden_dim]['hidden_dim']=hidden_dim
+        data_dict[im_penalty]['xcoder']=xcoder
+        data_dict[im_penalty]['im_penalty']=im_penalty
 
-        data_dict_model_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-01-24_15-45-50.pt'
+        
+        #data_dict_model_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-01-24_15-45-50.pt'
+        data_dict_model_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-05-07_16-45-20.pt'
         data_dict_model=torch.load(data_dict_model_path,weights_only=False)
         
         model_cfg=data_dict_model["model_cfg"]
@@ -82,19 +85,23 @@ def vary_hidden(hidden_dims:List,save:bool=False):
         model,state_dict=load_model(data_dict_model)
 
         activations=get_activations(model,P)
-
-        resid_acts=torch.stack([activations['blocks.0.hook_resid_pre'],activations['blocks.0.hook_resid_mid'],activations['blocks.0.hook_resid_post']],dim=0)
+        
+        print(f'activations keys {activations.keys()}')
+        # print(f'activations pre mlp shape {activations["blocks.0.mlp.hook_pre"].shape}')
+        # print(f'activations post mlp shape {activations["blocks.0.mlp.hook_post"].shape}')
+        # raise Exception('stop here')
+        resid_acts=torch.stack([activations['blocks.0.hook_resid_pre'],activations['blocks.0.hook_resid_mid'],activations['blocks.0.hook_resid_post']],dim=0)#activations['blocks.0.mlp.hook_pre'],activations['blocks.0.mlp.hook_post']
+        
+        #Let me see if I can reconstruct to mlp_pre
+        
         print(f'residual activations shape {resid_acts.shape}')
 
-        print(f'activations keys {activations.keys()}')
+        
 
         train_acts_BMLD=einops.rearrange(resid_acts,'layer batch sequence d_model -> (batch sequence) 1 layer d_model')
         dataset_length = train_acts_BMLD.shape[0]
 
         print(f'train acts rearranged shape {train_acts_BMLD.shape}')
-
-
-
 
         #so far lr=1e-3, 0.1, l1 coeff=1 and 1000 steps
         train_cfg = TrainConfig(
@@ -120,12 +127,15 @@ def vary_hidden(hidden_dims:List,save:bool=False):
             wandb_run=None,
             optimizer=optimizer,
             dataloader_BMLD=activation_iterator_BMLD(dataset_length,batch_size,train_acts_BMLD),
+            model=model,
+            lambda_im_penalty=im_penalty
         )
     
 
-        rec_loss=xc_trainer.train()
+        rec_loss,penalty_loss=xc_trainer.train()
 
-        data_dict[hidden_dim]['rec_loss']=rec_loss
+        data_dict[im_penalty]['rec_loss']=rec_loss
+        data_dict[im_penalty]['penalty_loss']=penalty_loss  
         #data_dict[hidden_dim]['sparsity_loss']=sparsity_loss
         
 
@@ -135,6 +145,7 @@ def vary_hidden(hidden_dims:List,save:bool=False):
             os.makedirs(save_dir,exist_ok=True)
             torch.save(data_dict,f'{save_dir}/start_{start_time}')
             print(f'saved to {save_dir}/start_{start_time}.pt')
+    return data_dict
 
 
 
@@ -150,21 +161,27 @@ if __name__=="__main__":
     lambda_=0
     epochs=300
     batch_size = 64
-    topk=4
+    #set in the vary_hidden
+    #topk=20
 
-    vary_hidden([16,17,18,19,20,21,22,23,24,25,30,40,50,60,70,80,90,100,200,300,400,500],save=True)
-    exit()
-    sweep_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/hidden_sweep/topk_16/start_2025-01-24 19:07:55'
-    sweep_dict=torch.load(sweep_path,weights_only=False)
-    hidden_dims=[k for k in sweep_dict if type(k)==int]
-    hidden_dims.sort()
-    print(f'hidden dims {hidden_dims}')
-    rec_losses=[sweep_dict[k]['rec_loss'][-1] for k in hidden_dims]
+    im_penalties=[0,10,100,1000]
+    data_dict=vary_hidden(im_penalties,save=True)
+    
+    
+    #sweep_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/hidden_sweep/topk_16/start_2025-01-24 19:07:55'
+    #sweep_dict=torch.load(sweep_path,weights_only=False)
+    #hidden_dims=[k for k in sweep_dict if type(k)==int]
+   # hidden_dims.sort()
+    #print(f'hidden dims {hidden_dims}')
+    sweep_dict=data_dict
+    rec_losses=[sweep_dict[k]['rec_loss'][-1] for k in im_penalties]
+    penalty_losses=[sweep_dict[k]['penalty_loss'][-1] for k in im_penalties]
     fig=make_subplots(rows=1,cols=1)
-    fig.add_trace(go.Scatter(x=hidden_dims,y=rec_losses),row=1,col=1)
-    fig.update_yaxes(title_text='Reconstruction Loss',type='log',row=1,col=1)
-    fig.update_xaxes(title_text='Hidden Dimension')
-    fig.update_layout(title_text=f'Hidden Dimension Sweep, topk {topk}')
+    fig.add_trace(go.Scatter(x=im_penalties,y=rec_losses,name='Reconstruction Loss'),row=1,col=1)
+    fig.add_trace(go.Scatter(x=im_penalties,y=penalty_losses,name='Penalty Loss'),row=1,col=1)
+    fig.update_yaxes(title_text='Loss',type='log',row=1,col=1)
+    fig.update_xaxes(title_text='Penalty')
+    fig.update_layout(title_text=f'Penalty Sweep, topk 20')
     fig.show()
     exit()
 

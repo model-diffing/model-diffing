@@ -13,12 +13,12 @@ import torch.nn as nn
 
 from model_diffing.models.ma_transformer import Transformer,TransformerConfig
 
-from model_diffing.dataloader.ma_dataset import datacfg,gen_train_test,get_is_train_test
-from model_diffing.models.crosscoder import build_relu_crosscoder,build_topk_crosscoder, AcausalCrosscoder
+from model_diffing.data.ma_dataset import datacfg,gen_train_test,get_is_train_test
+from model_diffing.models.crosscoder_light import build_relu_crosscoder,build_topk_crosscoder, AcausalCrosscoder
 from analyze_model import load_model, get_activations
 from model_diffing.scripts.train_l1_crosscoder_light.trainer import L1CrosscoderTrainer, LossInfo
 from model_diffing.scripts.train_l1_crosscoder_light.config import TrainConfig, DecayTo0LearningRateConfig
-from model_diffing.utils import l0_norm, calculate_reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms,reduce
+from model_diffing.scripts.ma.utils import l0_norm, calculate_reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms,reduce
 from torch.nn.utils import clip_grad_norm_
 import copy
 from datetime import datetime
@@ -206,9 +206,9 @@ if __name__=="__main__":
     print("the main character")
 
     #hidden_dims=[20,25,30,31,32,33,34,35,36,37,38,39,40,45,50,51,52,53,54,55,60,61,62,63,64,65,70,80,90,100,110,120,130,150,200]
-    hidden_dims=[30,40,45,50,60,70,80,90,100]
-    sweep_data_dict,filename=vary_hidden(hidden_dims,save=True,model_P=113,lambda_=1e-2)
-    # exit()
+    hidden_dims=[20,30]
+    sweep_data_dict,filename=vary_hidden(hidden_dims,save=False,model_P=113,lambda_=1e-2)
+    exit()
     # test_sweep_config=xc_sweep_config(
     # model_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-01-24_15-45-50.pt',
     # save_dir='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/hidden_sweep',

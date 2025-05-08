@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 
 from model_diffing.models.ma_transformer import Transformer,TransformerConfig
-from model_diffing.dataloader.ma_dataset import datacfg,gen_train_test,get_is_train_test
+from model_diffing.data.ma_dataset import datacfg,gen_train_test,get_is_train_test
 import copy
 from datetime import datetime
 from tqdm import tqdm
@@ -20,7 +20,7 @@ device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 import plotly.colors as plc
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-
+from model_diffing.scripts.ma.utils import save_model_and_config
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -188,13 +188,14 @@ if __name__=="__main__":
     print(f'the P value you are running is: {args.P}')
     P=args.P
     save_dir=f'/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/models/{P}'
+    #save_dir=f'/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113'
     #Initialize the model
     trans_cfg = TransformerConfig(
         P=P,
         lr=1e-3,
         weight_decay=1e-5,
-        epochs=10000,
-        save_interval=1000,
+        epochs=100,
+        save_interval=100,
     )
     model = Transformer(trans_cfg)
     print(f'Transformer model:\n {model}')
@@ -228,6 +229,8 @@ if __name__=="__main__":
     model,train_losses,train_accs,test_losses,test_accs=train_loop(model,trans_cfg,train_set,train_labels,test_set,test_labels,save=True)
 
     quick_end_plot(train_losses,test_losses,train_accs,test_accs).show()
+
+    #save_model_and_config(model,trans_cfg,save_dir)
 
     
 

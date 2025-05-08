@@ -1,6 +1,5 @@
-from pydantic import BaseModel
-
-from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainConfig
+from model_diffing.scripts.config_common import BaseExperimentConfig, BaseTrainConfig, DataConfig
+from model_diffing.utils import BaseModel
 
 
 class L1CrosscoderConfig(BaseModel):
@@ -9,13 +8,15 @@ class L1CrosscoderConfig(BaseModel):
 
 
 class L1TrainConfig(BaseTrainConfig):
-    l1_coef_max: float = 5.0
-    l1_coef_n_steps: int = 1000
+    lambda_s_max: float = 5.0
+    lambda_s_n_steps: int = 1000
 
 
 class L1ExperimentConfig(BaseExperimentConfig):
+    data: DataConfig
     crosscoder: L1CrosscoderConfig
     train: L1TrainConfig
+<<<<<<< HEAD
 
 
 # class BaseExperimentConfig(BaseModel):
@@ -24,3 +25,6 @@ class L1ExperimentConfig(BaseExperimentConfig):
 #     data: DataConfig
 #     llms: LLMsConfig
 #     wandb: WandbConfig | Literal["disabled"] = WandbConfig()
+=======
+    hookpoints: list[str]
+>>>>>>> 362efdbd42f95bae26cdb984c8b8cd062c998afe

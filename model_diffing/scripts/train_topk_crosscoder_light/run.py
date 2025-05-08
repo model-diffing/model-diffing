@@ -17,6 +17,8 @@ def build_trainer(cfg: TopKExperimentConfig) -> TopKTrainer:
     device = get_device()
 
     llms = build_llms(cfg.llms, cfg.cache_dir, device)
+    
+    
 
     dataloader_BMLD = build_dataloader_BMLD(cfg.data, llms, cfg.cache_dir)
 
@@ -35,6 +37,8 @@ def build_trainer(cfg: TopKExperimentConfig) -> TopKTrainer:
 
     wandb_run = build_wandb_run(cfg)
 
+
+
     return TopKTrainer(
         cfg=cfg.train,
         llms=llms,
@@ -43,6 +47,7 @@ def build_trainer(cfg: TopKExperimentConfig) -> TopKTrainer:
         crosscoder=crosscoder,
         wandb_run=wandb_run,
         device=device,
+        model=model,
     )
 
 

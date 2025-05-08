@@ -1,12 +1,13 @@
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Literal, cast, overload
+from typing import Any, Generic, TypeVar, cast
 
 import torch as t
-from einops import einsum, rearrange, reduce
+from einops import einsum, reduce
 from torch import nn
 
-from model_diffing.scripts.train_jan_update_crosscoder.config import JumpReLUConfig
+from model_diffing.models.activations import ACTIVATIONS
 from model_diffing.utils import SaveableModule, l2_norm
 
 import sys
@@ -14,35 +15,28 @@ import sys
 
 """
 Dimensions:
-- M: number of models
 - B: batch size
-- L: number of layers
-- D: Subject model dimension
-- H: Autoencoder hidden dimension
+- X: arbitrary number of crosscoding dimensions
+- H: Autoencoder h dimension
+- D: Autoencoder d dimension
 """
 
-# hacky but useful for debugging
-t.Tensor.d = lambda self: f"{self.shape}, dtype={self.dtype}, device={self.device}"  # type: ignore
 
-
-class TopkActivation(SaveableModule):
-    def __init__(self, k: int):
-        super().__init__()
-        self.k = k
-
-    def forward(self, hidden_preactivation_BH: t.Tensor) -> t.Tensor:
-        _topk_values_BH, topk_indices_BH = hidden_preactivation_BH.topk(self.k, dim=-1)
-        hidden_BH = t.zeros_like(hidden_preactivation_BH)
-        hidden_BH.scatter_(-1, topk_indices_BH, _topk_values_BH)
-        return hidden_BH
-
-    def dump_cfg(self) -> dict[str, int | str]:
-        return {"k": self.k}
-
-    @classmethod
-    def from_cfg(cls, cfg: dict[str, Any]) -> "TopkActivation":
-        return cls(cfg["k"])
-
+def build_relu_crosscoder(
+    n_models: int,
+    n_layers: int,
+    d_model: int,
+    cc_hidden_dim: int,
+    dec_init_norm: float,
+) -> AcausalCrosscoder[ReLUActivation]:
+    return AcausalCrosscoder(
+        n_models=n_models,
+        n_layers=n_layers,
+        d_model=d_model,
+        hidden_dim=cc_hidden_dim,
+        dec_init_norm=dec_init_norm,
+        hidden_activation=ReLUActivation(),
+    )
 
 class BatchTopkActivation(SaveableModule):
     def __init__(self, k_per_example: int):
@@ -71,13 +65,12 @@ class ReLUActivation(SaveableModule):
     def forward(self, x: t.Tensor) -> t.Tensor:
         return t.relu(x)
 
-    def dump_cfg(self) -> dict[str, int | str]:
+    def _dump_cfg(self) -> dict[str, int | str]:
         return {}
 
     @classmethod
-    def from_cfg(cls, cfg: dict[str, Any]) -> "ReLUActivation":
+    def _from_cfg(cls, cfg: dict[str, Any]) -> "ReLUActivation":
         return cls()
-
 
 ACTIVATIONS = {
     "TopkActivation": TopkActivation,
@@ -86,383 +79,227 @@ ACTIVATIONS = {
 }
 
 
-def rectangle(x: t.Tensor) -> t.Tensor:
-    """
-    when:
-        x < -0.5 -> 0
-        -0.5 < x < 0.5 -> 1
-        x > 0.5 -> 0
-    """
-    return ((x > -0.5) & (x < 0.5)).to(x)
+
+TActivation = TypeVar("TActivation", bound=SaveableModule)
 
 
-class JumpReLUActivation(SaveableModule):
-    def __init__(
-        self,
-        size: int,
-        bandwidth: float,
-        threshold_init: float,
-    ):
-        super().__init__()
-        self.log_threshold_H = nn.Parameter(t.ones(size) * threshold_init)
-        self.bandwidth = bandwidth
-
-    def forward(self, x_BX: t.Tensor) -> t.Tensor:
-        return JumpReLU.apply(x_BX, self.log_threshold_H, self.bandwidth)  # type: ignore
-
-    def dump_cfg(self) -> dict[str, int | float | str]:
-        return {"size": self.log_threshold_H.shape[0], "bandwidth": self.bandwidth}
-
-    @classmethod
-    def from_cfg(cls, cfg: dict[str, Any]) -> "JumpReLUActivation":
-        return cls(**cfg)
+class InitStrategy(ABC, Generic[TActivation]):
+    @abstractmethod
+    def init_weights(self, cc: "AcausalCrosscoder[TActivation]") -> None: ...
 
 
-class JumpReLU(t.autograd.Function):
-    @staticmethod
-    def forward(
-        ctx: Any,
-        input_BX: t.Tensor,
-        log_threshold_X: t.Tensor,
-        bandwidth: float,
-        backprop_through_input: bool = False,
-    ) -> t.Tensor:
-        """
-        threshold_X is $\\theta$ in the GDM paper, $t$ in the Anthropic paper.
-
-        Where GDM don't backprop through the threshold in "jumping ahead", Anthropic do in the jan 2025 update.
-        """
-        threshold_X = log_threshold_X.exp()
-        ctx.save_for_backward(input_BX, threshold_X, t.tensor(bandwidth))
-        ctx.backprop_through_input = backprop_through_input
-        return input_BX > threshold_X * input_BX
-
-    @staticmethod
-    def backward(ctx: Any, grad_output_BX: t.Tensor) -> tuple[t.Tensor | None, t.Tensor, None]:  # type: ignore
-        input_BX, threshold_X, bandwidth = ctx.saved_tensors
-
-        grad_threshold_BX = (
-            threshold_X  #
-            * -(1 / bandwidth)
-            * rectangle((input_BX - threshold_X) / bandwidth)
-            * grad_output_BX
-        )
-
-        grad_threshold_X = grad_threshold_BX.sum(0)  # this is technically unnecessary as torch will automatically do it
-
-        if ctx.backprop_through_input:
-            return (
-                (input_BX > threshold_X) * grad_output_BX,  # input_BX
-                grad_threshold_X,
-                None,  # bandwidth
-            )
-
-        return (
-            None,  # input_BX
-            grad_threshold_X,
-            None,  # bandwidth
-        )
-
-
-class AcausalCrosscoder[TActivation: SaveableModule](SaveableModule):
-    """crosscoder that autoencodes activations of a subset of a model's layers"""
-
-    folded_scaling_factors_ML: t.Tensor | None
-    """Scaling factors that have been folded into the weights, if any"""
+class AcausalCrosscoder(SaveableModule, Generic[TActivation]):
+    is_folded: t.Tensor
+    folded_scaling_factors_X: t.Tensor | None
 
     def __init__(
         self,
-        n_models: int,
-        n_layers: int,
+        crosscoding_dims: tuple[int, ...],
         d_model: int,
         hidden_dim: int,
-        dec_init_norm: float,
         hidden_activation: TActivation,
+        skip_linear: bool = False,
+        init_strategy: InitStrategy[TActivation] | None = None,
     ):
         super().__init__()
-        self.n_models = n_models
-        self.n_layers = n_layers
+        self.crosscoding_dims = crosscoding_dims
         self.d_model = d_model
         self.hidden_dim = hidden_dim
         self.hidden_activation = hidden_activation
 
-        W_base_HMLD = t.randn((hidden_dim, n_models, n_layers, d_model))
+        self.W_dec_HXD = nn.Parameter(t.empty((hidden_dim, *crosscoding_dims, d_model)))
+        self.b_enc_H = nn.Parameter(t.empty((hidden_dim,)))
+        self.W_enc_XDH = nn.Parameter(t.empty((*crosscoding_dims, d_model, hidden_dim)))
+        self.b_dec_XD = nn.Parameter(t.empty((*crosscoding_dims, d_model)))
+        self.W_skip_XdXd = None
+        if skip_linear:
+            self.W_skip_XdXd = nn.Parameter(t.empty((*crosscoding_dims, d_model, *crosscoding_dims, d_model)))
 
-        self.W_dec_HMLD = nn.Parameter(W_base_HMLD.clone())
+        if init_strategy is not None:
+            init_strategy.init_weights(self)
 
-        with t.no_grad():
-            W_dec_norm_MLD1 = reduce(self.W_dec_HMLD, "hidden model layer d_model -> hidden model layer 1", l2_norm)
-            self.W_dec_HMLD.div_(W_dec_norm_MLD1)
-            self.W_dec_HMLD.mul_(dec_init_norm)
+        # Initialize the buffer with a zero tensor of the correct shape, this means it's always serialized
+        self.register_buffer("folded_scaling_factors_X", t.zeros(self.crosscoding_dims))
+        # However, track whether it's actually holding a meaningful value by using this boolean flag.
+        # Represented as a tensor so that it's serialized by torch.save
+        self.register_buffer("is_folded", t.tensor(False, dtype=t.bool))
 
-            self.W_enc_MLDH = nn.Parameter(
-                rearrange(  # "transpose" of the encoder weights
-                    W_base_HMLD,
-                    "hidden model layer d_model -> model layer d_model hidden",
-                )
-            )
-
-        self.b_dec_MLD = nn.Parameter(t.zeros((n_models, n_layers, d_model)))
-        self.b_enc_H = nn.Parameter(t.zeros((hidden_dim,)))
-
-        self.register_buffer("folded_scaling_factors_ML", None, persistent=True)
-
-    def encode(self, activation_BMLD: t.Tensor) -> t.Tensor:
-        hidden_BH = einsum(
-            activation_BMLD,
-            self.W_enc_MLDH,
-            "batch model layer d_model, model layer d_model hidden -> batch hidden",
+    def _encode_BH(self, activation_BXD: t.Tensor) -> t.Tensor:
+        pre_bias_BH = einsum(
+            activation_BXD,
+            self.W_enc_XDH,
+            "b ..., ... h -> b h",
         )
         hidden_BH = hidden_BH + self.b_enc_H
         
         return self.hidden_activation(hidden_BH)
 
-    def decode(self, hidden_BH: t.Tensor) -> t.Tensor:
-        activation_BMLD = einsum(
-            hidden_BH,
-            self.W_dec_HMLD,
-            "batch hidden, hidden model layer d_model -> batch model layer d_model",
-        )
-        activation_BMLD += self.b_dec_MLD
-        return activation_BMLD
+    def _decode_BXD(self, hidden_BH: t.Tensor) -> t.Tensor:
+        pre_bias_BXD = einsum(hidden_BH, self.W_dec_HXD, "b h, h ... d -> b ... d")
+        return pre_bias_BXD + self.b_dec_XD
+
+    def _validate_acts_shape(self, activation_BXD: t.Tensor) -> None:
+        _, *crosscoding_dims, d_model = activation_BXD.shape
+        if d_model != self.d_model:
+            raise ValueError(f"activation_BXD.shape[-1] {d_model} != d_model {self.d_model}")
+
+        if crosscoding_dims != list(self.crosscoding_dims):
+            raise ValueError(
+                f"activation_BXD.shape[:-1] {crosscoding_dims} != crosscoding_dims {self.crosscoding_dims}"
+            )
 
     @dataclass
-    class TrainResult:
+    class ForwardResult:
         hidden_BH: t.Tensor
-        reconstructed_acts_BMLD: t.Tensor
+        output_BXD: t.Tensor
+
+    def _forward(self, activation_BXD: t.Tensor) -> ForwardResult:
+        hidden_BH = self._encode_BH(activation_BXD)
+        output_BXD = self._decode_BXD(hidden_BH)
+
+        if self.W_skip_XdXd is not None:
+            # way easier to just flatten and run as a large flat matmul, instead of managing
+            # the 2 sets of arbitrary dimensions. (can't use 2 sets of ellipses in einsum)
+            _, *act_shape = activation_BXD.shape
+            activation_BXd = activation_BXD.flatten(start_dim=1)
+            linear_out_BXd = einsum(activation_BXd, self.W_skip_XdXd, "b cc_in, cc_in cc_out -> b cc_out")
+            linear_out_BXD = linear_out_BXd.unflatten(dim=1, sizes=act_shape)
+            output_BXD += linear_out_BXD
+
+        return self.ForwardResult(
+            hidden_BH=hidden_BH,
+            output_BXD=output_BXD,
+        )
 
     def forward_train(
         self,
-        activation_BMLD: t.Tensor,
-    ) -> TrainResult:
-        """returns the activations, the hidden states, and the reconstructed activations"""
-        self._validate_acts_shape(activation_BMLD)
+        activation_BXD: t.Tensor,
+    ) -> ForwardResult:
+        """returns the activations, the h states, and the reconstructed activations"""
+        self._validate_acts_shape(activation_BXD)
 
-        hidden_BH = self.encode(activation_BMLD)
-        reconstructed_BMLD = self.decode(hidden_BH)
+        res = self._forward(activation_BXD)
 
-        if reconstructed_BMLD.shape != activation_BMLD.shape:
-            raise ValueError(
-                f"reconstructed_BMLD.shape {reconstructed_BMLD.shape} != activation_BMLD.shape {activation_BMLD.shape}"
-            )
+        if res.output_BXD.shape != activation_BXD.shape:
+            raise ValueError(f"output_BXD.shape {res.output_BXD.shape} != activation_BXD.shape {activation_BXD.shape}")
 
-        return self.TrainResult(
-            hidden_BH=hidden_BH,
-            reconstructed_acts_BMLD=reconstructed_BMLD,
-        )
+        return res
 
-    def _validate_acts_shape(self, activation_BMLD: t.Tensor) -> None:
-        expected_shape = (self.n_models, self.n_layers, self.d_model)
-        if activation_BMLD.shape[1:] != expected_shape:
-            raise ValueError(
-                f"activation_BMLD.shape[1:] {activation_BMLD.shape[1:]} != expected_shape {expected_shape}"
-            )
+    def forward(self, activation_BXD: t.Tensor) -> t.Tensor:
+        return self._forward(activation_BXD).output_BXD
 
-    def forward(self, activation_BMLD: t.Tensor) -> t.Tensor:
-        hidden_BH = self.encode(activation_BMLD)
-        return self.decode(hidden_BH)
-
-    @property
-    def is_folded(self) -> bool:
-        return self.folded_scaling_factors_ML is not None
-
-    @contextmanager
-    def temporarily_fold_activation_scaling(self, scaling_factors_ML: t.Tensor):
-        """Temporarily fold scaling factors into weights."""
-        self.fold_activation_scaling_into_weights_(scaling_factors_ML)
-        yield
-        _ = self.unfold_activation_scaling_from_weights_()
-
-    # @overload
-    # def fold_activation_scaling_into_weights_(
-    #     self, activation_scaling_factors_ML: t.Tensor, temporary: Literal[True]
-    # ) -> "ContextManager": ...
-
-    # @overload
-    # def fold_activation_scaling_into_weights_(
-    #     self, activation_scaling_factors_ML: t.Tensor, temporary: Literal[False]
-    # ) -> None: ...
-
-    def fold_activation_scaling_into_weights_(self, activation_scaling_factors_ML: t.Tensor) -> None:
-        """scales the crosscoder weights by the activation scaling factors, so that the model can be run on raw llm activations."""
-        if self.is_folded:
-            raise ValueError("Scaling factors already folded into weights")
-
-        self._validate_scaling_factors(activation_scaling_factors_ML)
-        activation_scaling_factors_ML = activation_scaling_factors_ML.to(self.W_enc_MLDH.device)
-        self._scale_weights(activation_scaling_factors_ML)
-        # set buffer to prevent double-folding
-        self.folded_scaling_factors_ML = activation_scaling_factors_ML
-
-        # if temporary:
-        #     def on_exit():
-        #         _ = self.unfold_activation_scaling_from_weights_()
-        #     return ContextManager(on_exit)
-
-    def unfold_activation_scaling_from_weights_(self) -> t.Tensor:
-        if not self.is_folded:
-            raise ValueError("No folded scaling factors found")
-
-        folded_scaling_factors_ML = cast(t.Tensor, self.folded_scaling_factors_ML).clone()
-        # Clear the buffer before operations to prevent double-unfolding
-        self.folded_scaling_factors_ML = None
-        self._scale_weights(1 / folded_scaling_factors_ML)
-        return folded_scaling_factors_ML
-
-    @t.no_grad()
-    def _scale_weights(self, scaling_factors_ML: t.Tensor) -> None:
-        self.W_enc_MLDH.mul_(scaling_factors_ML[..., None, None])
-        self.W_dec_HMLD.div_(scaling_factors_ML[..., None])
-        self.b_dec_MLD.div_(scaling_factors_ML[..., None])
-
-    def _validate_scaling_factors(self, scaling_factors_ML: t.Tensor) -> None:
-        if t.any(scaling_factors_ML == 0):
-            raise ValueError("Scaling factors contain zeros, which would lead to division by zero")
-        if t.any(t.isnan(scaling_factors_ML)) or t.any(t.isinf(scaling_factors_ML)):
-            raise ValueError("Scaling factors contain NaN or Inf values")
-
-        expected_shape = (self.n_models, self.n_layers)
-        if scaling_factors_ML.shape != expected_shape:
-            raise ValueError(f"Expected shape {expected_shape}, got {scaling_factors_ML.shape}")
-
-    def dump_cfg(self) -> dict[str, Any]:
+    def _dump_cfg(self) -> dict[str, Any]:
         return {
-            "n_models": self.n_models,
-            "n_layers": self.n_layers,
+            "crosscoding_dims": self.crosscoding_dims,
             "d_model": self.d_model,
             "hidden_dim": self.hidden_dim,
             "hidden_activation_classname": self.hidden_activation.__class__.__name__,
-            "hidden_activation_cfg": self.hidden_activation.dump_cfg(),
+            "hidden_activation_cfg": self.hidden_activation._dump_cfg(),
+            # don't need to serialize init_strategy as loading from state_dict will re-initialize the params
         }
 
     @classmethod
-    def from_cfg(cls, cfg: dict[str, Any]) -> "AcausalCrosscoder[TActivation]":
+    def _from_cfg(cls, cfg: dict[str, Any]) -> "AcausalCrosscoder[TActivation]":
         hidden_activation_cfg = cfg["hidden_activation_cfg"]
         hidden_activation_classname = cfg["hidden_activation_classname"]
 
-        hidden_activation = ACTIVATIONS[hidden_activation_classname].from_cfg(hidden_activation_cfg)
+        hidden_activation_cls = ACTIVATIONS[hidden_activation_classname]
+        hidden_activation = cast(TActivation, hidden_activation_cls._from_cfg(hidden_activation_cfg))
 
-        cfg = {
-            "n_models": cfg["n_models"],
-            "n_layers": cfg["n_layers"],
-            "d_model": cfg["d_model"],
-            "hidden_dim": cfg["hidden_dim"],
-            "dec_init_norm": 0,  # dec_init_norm doesn't matter here as we're loading weights
-            "hidden_activation": hidden_activation,
-        }
-
-        return cls(**cfg)
+        return AcausalCrosscoder(
+            crosscoding_dims=cfg["crosscoding_dims"],
+            d_model=cfg["d_model"],
+            hidden_dim=cfg["hidden_dim"],
+            hidden_activation=hidden_activation,
+            # don't need to serialize init_strategy as loading from state_dict will re-initialize the params
+        )
 
     def with_decoder_unit_norm(self) -> "AcausalCrosscoder[TActivation]":
         """
-        Rescale the weights so that the decoder norm is one but the model makes the same predictions.
+        returns a copy of the model with the weights rescaled such that the decoder norm of each feature is one,
+        but the model makes the same predictions.
         """
-        W_dec_l2_norms_H = reduce(self.W_dec_HMLD, "hidden model layer dim -> hidden", l2_norm)
 
         cc = AcausalCrosscoder(
-            n_models=self.n_models,
-            n_layers=self.n_layers,
+            crosscoding_dims=self.crosscoding_dims,
             d_model=self.d_model,
             hidden_dim=self.hidden_dim,
-            dec_init_norm=0,  # this shouldn't matter
             hidden_activation=self.hidden_activation,
         )
 
         with t.no_grad():
-            cc.W_enc_MLDH.copy_(self.W_enc_MLDH * W_dec_l2_norms_H)
+
+            class ImPrettySureThisIsIncorrect(Exception):
+                pass
+
+            raise ImPrettySureThisIsIncorrect(
+                "need to figure out how the math works in the arbitrary extra dimensions case"
+            )
+
+            W_dec_l2_norms_X1H = reduce(self.W_dec_HXD, "h ... d -> ... 1 h", l2_norm)
+            W_dec_l2_norms_H = reduce(self.W_dec_HXD, "h ... -> h", l2_norm)
+            W_dec_l2_norms_HX1 = reduce(self.W_dec_HXD, "h ... d -> h ... 1", l2_norm)
+
+            cc.W_enc_XDH.copy_(self.W_enc_XDH * W_dec_l2_norms_X1H)
             cc.b_enc_H.copy_(self.b_enc_H * W_dec_l2_norms_H)
-            cc.W_dec_HMLD.copy_(self.W_dec_HMLD / W_dec_l2_norms_H[..., None, None, None])
-            # no alteration needed for self.b_dec_MLD
+            cc.W_dec_HXD.copy_(self.W_dec_HXD / W_dec_l2_norms_HX1)
+            # no alteration needed for self.b_dec_XD
 
         return cc
 
+    @t.no_grad()
+    def _scale_weights(self, scaling_factors_X: t.Tensor) -> None:
+        """the shape of scaling_factors_X must be the same as self.crosscoding_dims"""
+        if scaling_factors_X.shape != self.crosscoding_dims:
+            raise ValueError(
+                f"scaling_factors_X.shape {scaling_factors_X.shape} != self.crosscoding_dims {self.crosscoding_dims}"
+            )
 
-def build_relu_crosscoder(
-    n_models: int,
-    n_layers: int,
-    d_model: int,
-    cc_hidden_dim: int,
-    dec_init_norm: float,
-) -> AcausalCrosscoder[ReLUActivation]:
-    return AcausalCrosscoder(
-        n_models=n_models,
-        n_layers=n_layers,
-        d_model=d_model,
-        hidden_dim=cc_hidden_dim,
-        dec_init_norm=dec_init_norm,
-        hidden_activation=ReLUActivation(),
-    )
+        self.W_enc_XDH.mul_(scaling_factors_X[..., None, None])
+        self.W_dec_HXD.div_(scaling_factors_X[..., None])
+        self.b_dec_XD.div_(scaling_factors_X[..., None])
 
+    def _validate_scaling_factors(self, scaling_factors_X: t.Tensor) -> None:
+        if scaling_factors_X.shape != self.crosscoding_dims:
+            raise ValueError(f"Expected shape {self.crosscoding_dims}, got {scaling_factors_X.shape}")
+        if t.any(scaling_factors_X == 0):
+            raise ValueError("Scaling factors contain zeros, which would lead to division by zero")
+        if t.any(t.isnan(scaling_factors_X)) or t.any(t.isinf(scaling_factors_X)):
+            raise ValueError("Scaling factors contain NaN or Inf values")
 
-def build_topk_crosscoder(
-    n_models: int,
-    n_layers: int,
-    d_model: int,
-    cc_hidden_dim: int,
-    k: int,
-    dec_init_norm: float,
-) -> AcausalCrosscoder[TopkActivation]:
-    return AcausalCrosscoder(
-        n_models=n_models,
-        n_layers=n_layers,
-        d_model=d_model,
-        hidden_dim=cc_hidden_dim,
-        dec_init_norm=dec_init_norm,
-        hidden_activation=TopkActivation(k=k),
-    )
+    @contextmanager
+    def temporarily_fold_activation_scaling(self, scaling_factors_X: t.Tensor):
+        """Temporarily fold scaling factors into weights."""
+        self.fold_activation_scaling_into_weights_(scaling_factors_X)
+        yield
+        _ = self.unfold_activation_scaling_from_weights_()
 
+    def fold_activation_scaling_into_weights_(self, scaling_factors_X: t.Tensor) -> None:
+        """scales the crosscoder weights by the activation scaling factors, so that the m can be run on raw llm activations."""
+        if self.is_folded.item():
+            raise ValueError("Scaling factors already folded into weights")
 
-def build_batch_topk_crosscoder(
-    n_models: int,
-    n_layers: int,
-    d_model: int,
-    cc_hidden_dim: int,
-    k_per_example: int,
-    dec_init_norm: float,
-) -> AcausalCrosscoder[BatchTopkActivation]:
-    return AcausalCrosscoder(
-        n_models=n_models,
-        n_layers=n_layers,
-        d_model=d_model,
-        hidden_dim=cc_hidden_dim,
-        dec_init_norm=dec_init_norm,
-        hidden_activation=BatchTopkActivation(k_per_example=k_per_example),
-    )
+        self._validate_scaling_factors(scaling_factors_X)
+        scaling_factors_X = scaling_factors_X.to(self.W_enc_XDH.device)
+        self._scale_weights(scaling_factors_X)
 
+        # set buffer to prevent double-folding
+        self.folded_scaling_factors_X = scaling_factors_X
+        self.is_folded = t.tensor(True, dtype=t.bool)
 
-def build_jumprelu_crosscoder(
-    n_models: int,
-    n_layers: int,
-    d_model: int,
-    cc_hidden_dim: int,
-    jumprelu: JumpReLUConfig,
-    dec_init_norm: float,
-) -> AcausalCrosscoder[JumpReLUActivation]:
-    return AcausalCrosscoder(
-        n_models=n_models,
-        n_layers=n_layers,
-        d_model=d_model,
-        hidden_dim=cc_hidden_dim,
-        dec_init_norm=dec_init_norm,
-        hidden_activation=JumpReLUActivation(
-            size=cc_hidden_dim,
-            bandwidth=jumprelu.bandwidth,
-            threshold_init=jumprelu.threshold_init,
-        ),
-    )
+    def unfold_activation_scaling_from_weights_(self) -> t.Tensor:
+        if not self.is_folded.item():
+            raise ValueError("No folded scaling factors found")
 
+        if self.folded_scaling_factors_X is None:
+            raise ValueError("Inconsistent state: is_folded is True but folded_scaling_factors_X is None")
 
-# if __name__ == "__main__":
-#     model = build_batch_topk_crosscoder(n_models=2, n_layers=3, d_model=4, cc_hidden_dim=5, k=2, dec_init_norm=1.0)
-#     model.push_to_hub(repo_id="model-diffing/batch-topk-crosscoder", use_auth_token=True)
+        folded_scaling_factors_X = self.folded_scaling_factors_X.clone()
+        # Clear the buffer before operations to prevent double-unfolding
 
+        self.folded_scaling_factors_X = None
+        self.is_folded = t.tensor(False, dtype=t.bool)
 
-# class ContextManager:
-#     def __init__(self, on_exit: Callable[[], None]):
-#         self.on_exit = on_exit
+        self._scale_weights(1 / folded_scaling_factors_X)
 
-#     def __enter__(self):
-#         return self
-
-#     def __exit__(self, exc_type, exc_value, traceback):  # type: ignore
-#         self.on_exit()
+        return folded_scaling_factors_X

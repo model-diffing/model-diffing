@@ -11,15 +11,15 @@ from transformers import PreTrainedTokenizerBase
 from wandb.sdk.wandb_run import Run
 
 from model_diffing.log import logger
-from model_diffing.models.crosscoder import AcausalCrosscoder
+from model_diffing.models.crosscoder_light import AcausalCrosscoder
 from model_diffing.scripts.train_l1_crosscoder_light.config import TrainConfig
-from model_diffing.scripts.utils import estimate_norm_scaling_factor_ML
-from model_diffing.utils import l0_norm, calculate_reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms
+from model_diffing.scripts.ma.utils import estimate_norm_scaling_factor_ML
+from model_diffing.scripts.ma.utils import l0_norm, calculate_reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms
 from tqdm import tqdm
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-
+#hacks to make old stuff work post pull
 
 
 
