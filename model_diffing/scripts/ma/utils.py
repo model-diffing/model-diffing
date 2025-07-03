@@ -17,6 +17,10 @@ import sys
 
 device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+def get_loss_recovered(input:torch.Tensor,model,xc):
+    
+    return None
+
 def get_neuron_preacts_cutoff(enc_acts_BH:torch.Tensor,W_dec_PHD:torch.Tensor,b_dec_PD:torch.Tensor,W_ins:torch.Tensor,b_ins:torch.Tensor,W_outs:torch.Tensor,b_outs:torch.Tensor,device:str="cpu",bias:float=0):
     """
     Idea of this calculation is to cutoff the encoding past the point

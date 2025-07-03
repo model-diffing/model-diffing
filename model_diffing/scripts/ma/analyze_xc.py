@@ -16,11 +16,11 @@ from model_diffing.utils import calculate_reconstruction_loss
 from model_diffing.models.ma_transformer import Transformer,TransformerConfig
 
 from model_diffing.dataloader.ma_dataset import datacfg,gen_train_test,get_is_train_test
-from model_diffing.models.crosscoder import build_relu_crosscoder,build_topk_crosscoder, AcausalCrosscoder
+from model_diffing.models.crosscoder_light import build_relu_crosscoder,build_topk_crosscoder, AcausalCrosscoder
 from analyze_model import load_model, get_activations,make_fourier_transform,rearrange_fourier_neel,fft2d,imshow_fourier,freq_num
 from model_diffing.scripts.train_l1_crosscoder_light.trainer import L1CrosscoderTrainer, LossInfo
 from model_diffing.scripts.train_l1_crosscoder_light.config import TrainConfig, DecayTo0LearningRateConfig
-from model_diffing.utils import l0_norm, calculate_reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms,reduce
+from model_diffing.scripts.ma.utils import l0_norm, calculate_reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms,reduce
 from torch.nn.utils import clip_grad_norm_
 import copy
 from datetime import datetime
@@ -883,6 +883,8 @@ if __name__ == '__main__':
     xc=xc_dict[50]["xcoder"]
     data_dict=torch.load(saved_model_path,weights_only=False)
     model,state_dict=load_model(data_dict)
+    
+    exit('everything loaded')
 
     data_cfg=data_dict["data_cfg"]
     P=data_cfg.P

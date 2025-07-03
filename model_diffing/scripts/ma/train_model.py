@@ -192,14 +192,32 @@ if __name__=="__main__":
     #Initialize the model
     trans_cfg = TransformerConfig(
         P=P,
-        lr=1e-3,
-        weight_decay=1e-5,
-        epochs=100,
+        lr=5e-4,
+        weight_decay=1e-4,
+        epochs=1_000,
         save_interval=100,
     )
     model = Transformer(trans_cfg)
     print(f'Transformer model:\n {model}')
     print(f'Transformer cfg:\n {trans_cfg}')
+
+    print(f'model: {model}')
+    # INSERT_YOUR_CODE
+    print("Model parameters and their mean values:")
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print(f"{name}: mean={param.data.mean().item()}")
+
+    # Clamp W_K and W_Q to zero for all blocks
+    # for block in model.blocks:
+    #     block.attn.W_K.data.zero_()
+    #     block.attn.W_Q.data.zero_()
+    #     block.attn.W_K.requires_grad = False
+    #     block.attn.W_Q.requires_grad = False
+    # print(f'Clamped W_K and W_Q to zero. W_K shape: {model.blocks[0].attn.W_K.shape}')
+    
+    
+
 
     #Load in the data
     data_cfg=datacfg(
@@ -226,7 +244,7 @@ if __name__=="__main__":
 
     #train the model
 
-    model,train_losses,train_accs,test_losses,test_accs=train_loop(model,trans_cfg,train_set,train_labels,test_set,test_labels,save=True)
+    model,train_losses,train_accs,test_losses,test_accs=train_loop(model,trans_cfg,train_set,train_labels,test_set,test_labels,save=False)
 
     quick_end_plot(train_losses,test_losses,train_accs,test_accs).show()
 

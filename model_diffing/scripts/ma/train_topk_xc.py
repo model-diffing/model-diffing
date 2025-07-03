@@ -57,9 +57,9 @@ def vary_hidden(im_penalties:List,save:bool=False):
     lambda_=0
     batch_size = 64
     learning_rate=1e-3
-    opt_steps=20_000
+    opt_steps=1_000
     topk=20
-    hidden_dim=200
+    hidden_dim=500
 
 
 
@@ -164,12 +164,15 @@ if __name__=="__main__":
     #set in the vary_hidden
     #topk=20
 
-    im_penalties=[0,10,100,1000]
-    data_dict=vary_hidden(im_penalties,save=True)
+    im_penalties=[0]
+    data_dict=vary_hidden(im_penalties,save=False)
     
     
-    #sweep_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/hidden_sweep/topk_16/start_2025-01-24 19:07:55'
+    #sweep_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/hidden_sweep/topk_20/start_2025-07-03 17:57:37'
     #sweep_dict=torch.load(sweep_path,weights_only=False)
+        
+    
+    
     #hidden_dims=[k for k in sweep_dict if type(k)==int]
    # hidden_dims.sort()
     #print(f'hidden dims {hidden_dims}')
