@@ -59,7 +59,10 @@ def vary_hidden(im_penalties:List,save:bool=False,sweep_args_dict=None):
     learning_rate=1e-3
     opt_steps=100_000
     topk=20
-    hidden_dim=500
+    hidden_dim=50
+
+
+    
 
 
 
@@ -69,6 +72,7 @@ def vary_hidden(im_penalties:List,save:bool=False,sweep_args_dict=None):
     data_dict['base_config']=copy.deepcopy(base_config)
     start_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for im_penalty in tqdm(im_penalties):
+        print(f'Hidden dim: {hidden_dim}')
         xcoder=build_topk_crosscoder(n_models, n_layers,d_model,hidden_dim,topk,dec_init_norm)
         
         data_dict[im_penalty]['xcoder']=xcoder
