@@ -10,8 +10,8 @@ from typing import TypedDict,Union, Any,List,Dict,Tuple
 
 
 from model_diffing.models.ma_transformer import Transformer,TransformerConfig
-
 from model_diffing.data.ma_dataset import datacfg,gen_train_test,get_is_train_test
+from model_diffing.scripts.ma.utils import get_activations
 import copy
 from datetime import datetime
 from tqdm import tqdm
@@ -139,15 +139,7 @@ def imshow_fourier(tensor:torch.Tensor, P:int, title='', animation_name='snapsho
     
     return fig
 
-def get_activations(model:Transformer,P:int)->Dict[str, Any]:
-    all_data = torch.tensor([(i, j, P) for i in range(P) for j in range(P)]).to(device)
-    labels = torch.tensor([(i+j)%P for i, j, _ in all_data]).to(device)
-    cache = {}
-    #model.remove_all_hooks()
-    model.cache_all(cache)
-    model(all_data)
-    model.remove_all_hooks()
-    return cache
+
 
     
     

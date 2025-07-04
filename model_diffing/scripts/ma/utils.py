@@ -13,13 +13,195 @@ from tqdm import tqdm
 from itertools import islice
 import einops
 import sys
+from model_diffing.dataloader.ma_dataset import datacfg
+from model_diffing.models.crosscoder_light import build_relu_crosscoder,build_topk_crosscoder, AcausalCrosscoder
+
+from torch.nn import functional as F
+from typing import Tuple,Any
+
+
+layer_names=['blocks.0.hook_resid_pre','blocks.0.hook_resid_mid','blocks.0.hook_resid_post']
+
+def get_activations(model:Transformer,P:int)->Dict[str, Any]:
+    all_data = torch.tensor([(i, j, P) for i in range(P) for j in range(P)]).to(device)
+    labels = torch.tensor([(i+j)%P for i, j, _ in all_data]).to(device)
+    cache = {}
+    #model.remove_all_hooks()
+    model.cache_all(cache)
+    model(all_data)
+    model.remove_all_hooks()
+    return cache
+
+def get_raw_and_rec_acts(model: Transformer, data_cfg: datacfg, xc:AcausalCrosscoder,layers=layer_names) -> Tuple[torch.Tensor, torch.Tensor]:
+	"""Get raw model activations and their reconstructions from the crosscoder
+	
+	Args:
+		model: The transformer model to get activations from
+		data_cfg: Data config containing parameters like P
+		xc: The trained crosscoder
+		
+	Returns:
+		Tuple of (raw_activations, reconstructed_activations) with shape (batch*seq, layers, d_model)
+	"""
+	
+	# Get raw activations from model
+	acts = get_activations(model, data_cfg.P)
+	
+	resid_acts = torch.stack([acts[layer_name] for layer_name in layers], dim=0)
+	
+	# Reshape for crosscoder input (batch*seq, 1, layers, d_model)
+	train_acts_BMLD = einops.rearrange(resid_acts, 
+		'layer batch sequence d_model -> (batch sequence) 1 layer d_model')
+	# The inverse operation would be:
+	# resid_acts = einops.rearrange(train_acts_BMLD,
+	#     '(batch sequence) 1 layer d_model -> layer batch sequence d_model')
+	
+	# Get reconstructions
+	hidden = xc.encode(train_acts_BMLD)
+	reconstructed = xc.decode(hidden)
+	
+	
+	return train_acts_BMLD, reconstructed,hidden
+
+
+def cross_entropy_high_precision(logits:torch.Tensor, labels:torch.Tensor):
+	# Shapes: batch x vocab, batch
+	# Cast logits to float64 because log_softmax has a float32 underflow on overly
+	# confident data and can only return multiples of 1.2e-7 (the smallest float x
+	# such that 1+x is different from 1 in float32). This leads to loss spikes
+	# and dodgy gradients
+	logprobs = F.log_softmax(logits.to(torch.float64), dim=-1)
+	prediction_logprobs = torch.gather(logprobs, index=labels[:, None], dim=-1)
+	loss = -torch.mean(prediction_logprobs)
+	return loss
 
 
 device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def get_loss_recovered(input:torch.Tensor,model,xc):
+class ActivationReplacer:
+	def __init__(self, model):
+		"""Initialize with a transformer model."""
+		self.model = model
+		self.replacement_hooks = {}
+		self.hook_handles = []
+		
+	def register_replacement(self, hook_name, activation_tensor):
+		"""Register a tensor to replace activations at a specific hook point."""
+		self.replacement_hooks[hook_name] = activation_tensor
+		
+	def _create_replacement_hook(self, hook_name):
+		"""Create a hook function that replaces activations with registered tensor."""
+		def hook_fn(activation, name):
+			if name in self.replacement_hooks:
+				# Ensure shapes match
+				replacement = self.replacement_hooks[name]
+				if replacement.shape != activation.shape:
+					raise ValueError(
+						f"Shape mismatch at {name}. "
+						f"Expected {activation.shape}, got {replacement.shape}"
+					)
+				return replacement
+			return activation
+		return hook_fn
+	
+	def apply(self):
+		"""Apply all registered replacements to the model."""
+		# Remove any existing hooks first
+		self.remove()
+		
+		# Add new hooks for each registered replacement
+		for hook_point in self.model.hook_points():
+			if hook_point.name in self.replacement_hooks:
+				handle = hook_point.add_hook(
+					self._create_replacement_hook(hook_point.name)
+				)
+				self.hook_handles.append(handle)
+	
+	def remove(self):
+		"""Remove all replacement hooks."""
+		for hook_point in self.model.hook_points():
+			hook_point.remove_hooks('fwd')
+		self.hook_handles = []
+
+def get_loss_recovered(input,model,xc,data_cfg):
+    """
+    Evaluate loss recovered for the crosscoder on the model.
+    TODO: add option to do it at the MLP.
+
+    Assumes input is a PxPxd_M tensor of inputs. 
+    """
+
+    def replacer_func(rec_acts_B1LD):
+        """
+        Replaces the activations of the model with the reconstructed activations.
+        """
+        replacer = ActivationReplacer(model)
+        for i, hook_name in enumerate(layer_names):
+            replacer.register_replacement(hook_name, rec_acts_B1LD[i])
+        replacer.apply()
+
+    ###############################################################################
+    # 0.  Set-up
+    ###############################################################################
+    W_U=model.unembed.W_U
+    P=(W_U.shape[1]-1)
     
-    return None
+    device = next(model.parameters()).device
+    layer_names=['blocks.0.hook_resid_pre','blocks.0.hook_resid_mid','blocks.0.hook_resid_post']
+
+    # tokens  shape = [batch, 3]
+    tokens  = torch.tensor([(i, j, P) for i in range(P) for j in range(P)],
+                        device=device)
+
+    labels  = torch.tensor([(i + j) % P for i in range(P) for j in range(P)],
+                        device=device)
+
+    ###############################################################################
+    # 1.  Baseline loss (no hooks)
+    ###############################################################################
+    model.eval()                          # no dropout etc.
+    with torch.no_grad():
+        logits_orig = model(tokens)[:, -1, :-1]                # ignore "=" class
+        loss_orig   = cross_entropy_high_precision(logits_orig, labels)
+
+    ###############################################################################
+    # 2.  Build reconstructed activations for the SAME tokens
+    ###############################################################################
+    raw_B1LD, rec_B1LD, _ = get_raw_and_rec_acts(
+        model, data_cfg, xc, layers=layer_names
+    )                                   # (batch*seq ,1 ,layer ,d_model)
+
+    rec_LBSD = einops.rearrange(
+        rec_B1LD, '(b s) 1 l d -> l b s d', s=tokens.shape[1]
+    )                                   # one tensor per HookPoint
+
+    ###############################################################################
+    # 3.  Register the replacements and run the model again
+    ###############################################################################
+    replacer = ActivationReplacer(model)
+    for i, hook_name in enumerate(layer_names):
+        replacer.register_replacement(hook_name, rec_LBSD[i])
+    replacer.apply()                     # attaches the hooks
+
+    with torch.no_grad():
+        logits_rep = model(tokens)[:, -1, :-1]
+        loss_rep   = cross_entropy_high_precision(logits_rep, labels)
+
+    replacer.remove()                    # IMPORTANT – clean up afterwards
+
+    ###############################################################################
+    # 4.  Now do the same for zero ablations
+    ###############################################################################
+    replacer_func(torch.zeros_like(rec_LBSD))
+    with torch.no_grad():
+        logits_zero = model(tokens)[:, -1, :-1]
+        loss_zero   = cross_entropy_high_precision(logits_zero, labels)
+    replacer.remove()
+
+    loss_recovered=1-(loss_rep-loss_orig)/(loss_zero-loss_orig)
+
+            
+    return loss_orig,loss_rep,loss_zero,loss_recovered
 
 def get_neuron_preacts_cutoff(enc_acts_BH:torch.Tensor,W_dec_PHD:torch.Tensor,b_dec_PD:torch.Tensor,W_ins:torch.Tensor,b_ins:torch.Tensor,W_outs:torch.Tensor,b_outs:torch.Tensor,device:str="cpu",bias:float=0):
     """

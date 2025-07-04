@@ -19,7 +19,7 @@ from analyze_model import load_model, get_activations
 
 from model_diffing.scripts.train_topk_crosscoder_light.trainer import TopKTrainer
 from model_diffing.scripts.train_l1_crosscoder_light.config import TrainConfig,DecayTo0LearningRateConfig 
-from model_diffing.scripts.ma.utils import l0_norm, calculate_reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms,reduce
+from model_diffing.scripts.ma.utils import l0_norm, calculate_reconstruction_loss, save_model_and_config, sparsity_loss_l1_of_norms,reduce,get_loss_recovered
 from torch.nn.utils import clip_grad_norm_
 import copy
 from datetime import datetime
@@ -47,7 +47,7 @@ def activation_iterator_BMLD(dataset_length,batch_size,train_acts_BMLD):
         
         yield train_acts_BMLD[indices]
 
-def vary_hidden(im_penalties:List,save:bool=False):
+def vary_hidden(im_penalties:List,save:bool=False,sweep_args_dict=None):
     data_dict=defaultdict(dict)
 
     n_models=1
@@ -57,7 +57,7 @@ def vary_hidden(im_penalties:List,save:bool=False):
     lambda_=0
     batch_size = 64
     learning_rate=1e-3
-    opt_steps=1_000
+    opt_steps=100_000
     topk=20
     hidden_dim=500
 
@@ -74,9 +74,10 @@ def vary_hidden(im_penalties:List,save:bool=False):
         data_dict[im_penalty]['xcoder']=xcoder
         data_dict[im_penalty]['im_penalty']=im_penalty
 
+
         
-        #data_dict_model_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-01-24_15-45-50.pt'
-        data_dict_model_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-05-07_16-45-20.pt'
+        data_dict_model_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-01-24_15-45-50.pt'
+        #data_dict_model_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-05-07_16-45-20.pt'
         data_dict_model=torch.load(data_dict_model_path,weights_only=False)
         
         model_cfg=data_dict_model["model_cfg"]
@@ -137,7 +138,9 @@ def vary_hidden(im_penalties:List,save:bool=False):
         data_dict[im_penalty]['rec_loss']=rec_loss
         data_dict[im_penalty]['penalty_loss']=penalty_loss  
         #data_dict[hidden_dim]['sparsity_loss']=sparsity_loss
-        
+        loss_orig,loss_rep,loss_zero,loss_recovered=get_loss_recovered(train_acts_BMLD,model,xcoder,data_cfg)
+        print(f'loss_recovered {loss_recovered}')
+        data_dict[im_penalty]['loss_recovered']=loss_recovered
 
 
         if save:
@@ -153,14 +156,14 @@ def vary_hidden(im_penalties:List,save:bool=False):
 if __name__=="__main__":
     print("the main character")
 
-    n_models=1
-    n_layers=3
-    d_model=128
-    hidden_dim=200
-    dec_init_norm=1#not sure 0.05 worked well before
-    lambda_=0
-    epochs=300
-    batch_size = 64
+    # n_models=1
+    # n_layers=3
+    # d_model=128
+    # hidden_dim=200
+    # dec_init_norm=1#not sure 0.05 worked well before
+    # lambda_=0
+    # epochs=300
+    # batch_size = 64
     #set in the vary_hidden
     #topk=20
 
@@ -177,12 +180,16 @@ if __name__=="__main__":
    # hidden_dims.sort()
     #print(f'hidden dims {hidden_dims}')
     sweep_dict=data_dict
-    rec_losses=[sweep_dict[k]['rec_loss'][-1] for k in im_penalties]
-    penalty_losses=[sweep_dict[k]['penalty_loss'][-1] for k in im_penalties]
+    rec_losses=[sweep_dict[k]['rec_loss'] for k in im_penalties]
+    penalty_losses=[sweep_dict[k]['penalty_loss'] for k in im_penalties]
+    #losses_recovered=[sweep_dict[k]['loss_recovered'] for k in im_penalties]
     fig=make_subplots(rows=1,cols=1)
-    fig.add_trace(go.Scatter(x=im_penalties,y=rec_losses,name='Reconstruction Loss'),row=1,col=1)
-    fig.add_trace(go.Scatter(x=im_penalties,y=penalty_losses,name='Penalty Loss'),row=1,col=1)
+    fig.add_trace(go.Scatter(x=np.arange(len(rec_losses[0])),y=rec_losses[0],name='Reconstruction Loss'),row=1,col=1)
+    fig.add_trace(go.Scatter(x=np.arange(len(penalty_losses[0])),y=penalty_losses[0],name='Penalty Loss'),row=1,col=1)
+    #fig.add_trace(go.Scatter(x=im_penalties,y=losses_recovered,name='Loss Recovered'),row=1,col=2)
     fig.update_yaxes(title_text='Loss',type='log',row=1,col=1)
+    fig.update_xaxes(title_text='Optimization Step',type='log')
+    
     fig.update_xaxes(title_text='Penalty')
     fig.update_layout(title_text=f'Penalty Sweep, topk 20')
     fig.show()

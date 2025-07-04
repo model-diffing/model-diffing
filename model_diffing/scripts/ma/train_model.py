@@ -208,6 +208,8 @@ if __name__=="__main__":
         if param.requires_grad:
             print(f"{name}: mean={param.data.mean().item()}")
 
+    #You can write a unittest for this! If attention is zero,
+    #then the model model shol
     # Clamp W_K and W_Q to zero for all blocks
     # for block in model.blocks:
     #     block.attn.W_K.data.zero_()
@@ -215,6 +217,7 @@ if __name__=="__main__":
     #     block.attn.W_K.requires_grad = False
     #     block.attn.W_Q.requires_grad = False
     # print(f'Clamped W_K and W_Q to zero. W_K shape: {model.blocks[0].attn.W_K.shape}')
+    
     
     
 
