@@ -138,7 +138,8 @@ def train_loop(model,model_cfg,train_set,train_labels,test_set,test_labels,save=
                 pbar.update(1) 
 
                 print(f'Epoch {epoch}:\n Train loss: {train_loss}\n Test loss: {test_loss}\n Train accuracy: {train_acc}\n Test accuracy: {test_acc}')
-        
+    if save:
+        print(f'Saved model to:\n {filename}')
     return model,train_losses,train_accs,test_losses,test_accs
 
 def plot_progress(train_losses,train_accs,test_losses,test_accs):
@@ -187,8 +188,8 @@ if __name__=="__main__":
     args = parser.parse_args()
     print(f'the P value you are running is: {args.P}')
     P=args.P
-    save_dir=f'/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/models/{P}'
-    #save_dir=f'/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113'
+    #save_dir=f'/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/models/{P}'
+    save_dir=f'/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/{P}'
     #Initialize the model
     trans_cfg = TransformerConfig(
         P=P,
@@ -247,7 +248,7 @@ if __name__=="__main__":
 
     #train the model
 
-    model,train_losses,train_accs,test_losses,test_accs=train_loop(model,trans_cfg,train_set,train_labels,test_set,test_labels,save=False)
+    model,train_losses,train_accs,test_losses,test_accs=train_loop(model,trans_cfg,train_set,train_labels,test_set,test_labels,save=True)
 
     quick_end_plot(train_losses,test_losses,train_accs,test_accs).show()
 

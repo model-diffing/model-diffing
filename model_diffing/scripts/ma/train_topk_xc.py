@@ -80,8 +80,9 @@ def vary_hidden(im_penalties:List,save:bool=False,sweep_args_dict=None):
 
 
         
-        data_dict_model_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-01-24_15-45-50.pt'
+        #data_dict_model_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-01-24_15-45-50.pt'
         #data_dict_model_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-05-07_16-45-20.pt'
+        data_dict_model_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.0005_2025-07-05_17-17-29.pt'
         data_dict_model=torch.load(data_dict_model_path,weights_only=False)
         
         model_cfg=data_dict_model["model_cfg"]
