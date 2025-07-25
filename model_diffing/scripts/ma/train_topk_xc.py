@@ -59,7 +59,7 @@ def vary_hidden(im_penalties:List,save:bool=False,sweep_args_dict=None):
     learning_rate=1e-3
     opt_steps=100_000
     topk=20
-    hidden_dim=50
+    hidden_dim=100
 
 
     
@@ -173,7 +173,7 @@ if __name__=="__main__":
     #topk=20
 
     im_penalties=[0]
-    data_dict=vary_hidden(im_penalties,save=False)
+    data_dict=vary_hidden(im_penalties,save=True)
     
     
     #sweep_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/hidden_sweep/topk_20/start_2025-07-03 17:57:37'

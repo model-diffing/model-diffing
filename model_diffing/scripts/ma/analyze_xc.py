@@ -239,7 +239,7 @@ def imshow_fourier(tensor, title='', animation_name='snapshot', facet_labels=[],
 	fig.show()
 
 
-def imshow_fourier2(tensor, title='', facet_labels=[], P:int=113, **kwargs):
+def imshow_fourier2(tensor, title='', facet_labels=[], P:int=113,optional_var_explained:torch.Tensor=None, **kwargs):
 	# Set nice defaults for plotting functions in the 2D fourier basis
 	# tensor is assumed to already be in the Fourier Basis
 	if tensor.shape[0] == P*P:
@@ -255,6 +255,20 @@ def imshow_fourier2(tensor, title='', facet_labels=[], P:int=113, **kwargs):
 	frame_data = [{"data": tensor[:,:,i].detach().numpy(), "name": f"frame_{i}"} 
 				  for i in range(tensor.shape[2])]
 	
+	if optional_var_explained is not None:
+		var_explained_vals,var_explained_idx=torch.sort(optional_var_explained,dim=0,descending=True)
+		first_four_v=var_explained_vals[:4,:].detach().numpy()
+		first_four_idx=var_explained_idx[:4,:].detach().numpy()
+		#titles_dict={latent:f'frequency: {first_four_idx[i,latent]}, var explained: {first_four_v[i,latent]:.2%}' for latent in range(first_four_v.shape[-1]) for i in range(4)}
+		titles_dict = {
+			latent: '| '.join(
+				[f'freq: {first_four_idx[i, latent]}, var explained: {first_four_v[i, latent]:.2%}'
+				for i in range(4)]
+			)
+			for latent in range(first_four_v.shape[1])          # number of latents
+		}
+	else:
+		titles_dict={latent:'' for latent in range(optional_var_explained.shape[-1])}
 	not_fourier=True
 	if not_fourier:
 		x_labels=None
@@ -264,35 +278,43 @@ def imshow_fourier2(tensor, title='', facet_labels=[], P:int=113, **kwargs):
 			#y=fourier_basis_names,
 			labels={'x':'x Component',
 					'y':'y Component'},
-			title=title,
+			title=f'{titles_dict[0]}',
 			color_continuous_midpoint=0.,
 			color_continuous_scale='RdBu',
 			**kwargs)
-			
+	fig.update_layout(title=titles_dict[0])
+
+	fig.frames = [
+    go.Frame(
+        data=[go.Heatmap(z=frame_data[i]["data"])],
+        name=f'frame_{i}',
+        layout=dict(title=titles_dict[i])      # <-- this is the key line
+    )
+    for i in range(tensor.shape[2])
+	]
 	# Add slider
 	sliders = [{
 		'currentvalue': {'prefix': 'Slice: '},
 		'steps': [
 			{
 				'method': 'animate',
-				'args': [[f'frame_{i}'], {
-					'mode': 'immediate',
-					'frame': {'duration': 0, 'redraw': True},
-					'transition': {'duration': 0}
-				}],
+				'args': [[f'frame_{i}'],
+						{'mode': 'immediate',
+						'frame': {'duration': 0, 'redraw': True},  # redraw = True -> update layout
+						'transition': {'duration': 0}}],
 				'label': str(i)
 			} for i in range(tensor.shape[2])
 		]
 	}]
 	
 	# Update figure with frames and slider
-	fig.frames = [go.Frame(
-		data=[go.Heatmap(z=frame_data[i]["data"])],
-		name=f'frame_{i}'
-	) for i in range(tensor.shape[2])]
+	# fig.frames = [go.Frame(
+	# 	data=[go.Heatmap(z=frame_data[i]["data"])],
+	# 	name=f'frame_{i}'
+	# ) for i in range(tensor.shape[2])]
 	
 	fig.update_layout(sliders=sliders)
-	fig.update(data=[{'hovertemplate':"%{x}x * %{y}y<br>Value:%{z:.4f}"}])
+	# fig.update(data=[{'hovertemplate':"%{x}x * %{y}y<br>Value:%{z:.4f}"}])
 	
 	if facet_labels:
 		for i, label in enumerate(facet_labels):
@@ -777,6 +799,59 @@ def make_corr_matrices(pre_acts_f:torch.Tensor):
 	#fig.show()
 
 
+#Stolen freq extracter:
+
+def unflatten_first(tensor,P):
+    if tensor.shape[0]==P*P:
+        return einops.rearrange(tensor, '(x y) ... -> x y ...', x=P, y=P)
+    else:
+        return tensor
+
+def extract_freq_2d(tensor, freq,P):
+    # Takes in a pxpx... or batch x ... tensor, returns a 3x3x... tensor of the
+    # Linear and quadratic terms of frequency freq
+    tensor = unflatten_first(tensor,P)
+    # Extracts the linear and quadratic terms corresponding to frequency freq
+    index_1d = [0, 2*freq-1, 2*freq]
+    # Some dumb manipulation to use fancy array indexing rules
+    # Gets the rows and columns in index_1d
+    return tensor[[[i]*3 for i in index_1d], [index_1d]*3]
+
+def get_freq_frac_explained(tensor: torch.Tensor, P: int):
+    """Return the fraction of variance explained by each spatial frequency.
+
+    Parameters
+    ----------
+    tensor : torch.Tensor
+        Activations in spatial domain with shape `(P, P, hidden)` **or**
+        `(batch, P, P, hidden)`.
+    P : int
+        Prime modulus of the toy task (size of spatial grid).
+
+    Returns
+    -------
+    torch.Tensor
+        Tensor of shape `(P//2, hidden)` where entry `[f, h]` is the fraction
+        of variance of neuron `h` that is captured by the linear + quadratic
+        Fourier terms of spatial frequency `f`.
+    """
+
+    # support optional batch dimension by always treating the last two axes as
+    # spatial and the final axis as hidden-dim.
+    hidden_dim = tensor.shape[-1]
+    freq_tensor = torch.zeros(P // 2, hidden_dim, device=tensor.device)
+
+    # total power per neuron (sum over spatial dims, keep batch if present)
+    total_power = tensor.pow(2).sum(dim=(-3, -2))  # shape (..., hidden)
+
+    for freq in range(1, P // 2):
+        freq_power = extract_freq_2d(tensor, freq, P).pow(2).sum(dim=(-3, -2))
+        frac_explained = freq_power / (total_power + 1e-9)
+        freq_tensor[freq] = frac_explained.mean(dim=0) if frac_explained.dim() == 2 else frac_explained
+
+    return freq_tensor
+
+
 ##############Written functions
 
 #error_fig=errors_histogram(raw_acts,rec_acts,random_samples=1_000)
@@ -794,11 +869,14 @@ def make_corr_matrices(pre_acts_f:torch.Tensor):
 if __name__ == '__main__':
 	print('the main character')
 	
-	saved_model_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-01-24_15-45-50.pt'
+	#saved_model_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.001_2025-01-24_15-45-50.pt'
+	saved_model_path='/Users/dmitrymanning-coe/Documents/Research/compact_proofs/code/toy_models2/data/models/113/train_P_113_tf_0.8_lr_0.0005_2025-07-05_17-17-29.pt'
 	#train_xc_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/hidden_sweep/summarydicts/113/start_2025-02-04 08:28:46'
 	#'/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/hidden_sweep/summarydicts/113/start_2025-02-06 12:50:41'
-	train_xc_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/hidden_sweep/topk_20/start_2025-07-03 17:57:37'
 	
+	#train_xc_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/hidden_sweep/topk_20/start_2025-07-03 17:57:37'
+	train_xc_path='/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/hidden_sweep/topk_20/start_2025-07-05 17:54:00'
+	#'/Users/dmitrymanning-coe/Documents/Research/Compact Proofs/code/toy_models2/data/hidden_sweep/topk_20/start_2025-07-05 17:54:00.pt'
 	xc_dict=torch.load(train_xc_path,weights_only=False)
 	
 	torch.set_grad_enabled(False)
@@ -837,7 +915,7 @@ if __name__ == '__main__':
 	print(f'loss_rep {loss_rep}')
 	print(f'loss_zero {loss_zero}')
 	print(f'loss_recovered {loss_recovered}')
-	exit("trying to write loss recovered function")
+	
 	
 
 	rec_loss=calculate_reconstruction_loss(raw_acts,rec_acts)
@@ -852,13 +930,53 @@ if __name__ == '__main__':
 
 	
 	#Fourier things    
-	fourier_transformed=fft2d(invert_hidden_acts,fourier_basis,P)
-	fourier_rearrange=rearrange_fourier_neel(fourier_transformed,P)
-	print(f'fourier_rearrange shape {fourier_rearrange.shape}')
+	fourier_transformed_hidden_acts=fft2d(invert_hidden_acts,fourier_basis,P)
+	fourier_rearranged_hidden_acts=rearrange_fourier_neel(fourier_transformed_hidden_acts,P)
+	print(f'fourier_rearranged_hidden_acts shape {fourier_rearranged_hidden_acts.shape}')
 
-	f_hidden_acts=fourier_rearrange[:,:,-1,:]
-	flattened=rearrange_fourier_neel(invert_hidden_acts,P)
+	f_hidden_acts=fourier_rearranged_hidden_acts[:,:,-1,:]
+	flattened_hidden_acts=rearrange_fourier_neel(invert_hidden_acts,P)
+
 	
+
+	
+
+	freq_tensor=get_freq_frac_explained(f_hidden_acts,P)
+
+	print(f'freq tensor shape: {freq_tensor.shape}')
+	exit()
+
+	freq_tensor_ordered=torch.sort(freq_tensor,dim=0,descending=True).values
+
+	sort_idx=torch.argsort(freq_tensor_ordered[0],descending=True)
+
+	freq_tensor_ordered=freq_tensor_ordered[:,sort_idx]
+	
+
+	imshow_fourier2(f_hidden_acts[:,:,:5],optional_var_explained=freq_tensor[:,:5]).show()
+
+	exit(f'testing labelling')
+	
+	
+
+	print(f'freq_tensor shape {freq_tensor.shape}')
+
+	fig=make_subplots(rows=1,cols=1)
+	fig.add_trace(go.Heatmap(z=freq_tensor_ordered[:,:].T.detach().numpy(),colorscale='RdBu'),row=1,col=1)
+	fig.update_layout(title='Fraction of variance explained by each frequency')
+	fig.show()
+	
+	exit()
+	
+	
+	
+
+	
+
+
+
+	
+	exit('maybe I should try to get the heatmap here')
 
 
 	#model weights
